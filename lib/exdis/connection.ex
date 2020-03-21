@@ -105,53 +105,59 @@ defmodule Exdis.Connection do
   end
 
   defp handle_command(conn_id, transport, socket, in_buf, command) do
-    case Exdis.Command.handle(command, &send_command_reply(&1, &2, transport, socket)) do
+    case Exdis.Command.handle(command) do
       :ok ->
+        send_whole_command_reply(transport, socket, :ok)
         loop(conn_id, transport, socket, in_buf)
-      {:error, reason} ->
-        Logger.warn("#{conn_id} Failed to reply to command: #{inspect reason}")
-        exit(:normal)
+
+      {:error, _} = error ->
+        send_whole_command_reply(transport, socket, error)
+        loop(conn_id, transport, socket, in_buf)
+
+      {:async_ok, key_owner_pid, key_owner_mon, future_ref} ->
+        handle_async_command_reply(
+          conn_id, transport, socket, in_buf,
+          key_owner_pid, key_owner_mon, future_ref)
     end
   end
 
-  defp send_command_reply(:sync, reply, transport, socket) do
-    encoded_reply = Exdis.CommandReply.encode(reply)
-    transport.send(socket, encoded_reply)
+  defp handle_async_command_reply(
+    conn_id, transport, socket, in_buf,
+    key_owner_pid, key_owner_mon, future_ref)
+  do
+    #
+    # FIXME redo this mess of a loop
+    #
+    case Exdis.Database.KeyOwner.consume_future(key_owner_pid, key_owner_mon, future_ref) do
+      {:more, chunk} ->
+        send_partial_command_reply(transport, socket, chunk)
+        handle_async_command_reply(
+          conn_id, transport, socket, in_buf,
+          key_owner_pid, key_owner_mon, future_ref)
+
+      {:finished, chunk} ->
+        send_partial_command_reply(transport, socket, chunk)
+        loop(conn_id, transport, socket, in_buf)
+    end
   end
 
-  defp send_command_reply(:async, reply, :ranch_tcp, socket) do
-    # TODO paginate very large values
-    encoded_reply = Exdis.CommandReply.encode(reply)
-    # XXX should we use `nosuspend` on the following in case of very large payloads?
-    true = Port.command(socket, encoded_reply)
-    monitor = Port.monitor(socket)
-    continuation_cb = fn (status) -> {:finished, status} end
-    {:await, socket, continuation_cb, monitor}
+  defp send_whole_command_reply(transport, socket, reply) do
+    data = Exdis.CommandReply.encode(reply)
+    write_to_socket(transport, socket, data)
   end
 
-  defp send_command_reply(:async, _reply, :ranch_ssl, _socket) do
-    exit(:notsup)
+  defp send_partial_command_reply(transport, socket, chunk) do
+    # TODO
+    send_whole_command_reply(transport, socket, chunk)
   end
 
-#  defp handle_command(conn_id, transport, socket, in_buf, command) do
-#    {:go, regulator_ref, regulator_pid} = Exdis.Regulator.ask()
-#    reply =
-#      try do
-#        Exdis.Command.handle(command)
-#      after
-#        Exdis.Regulator.done(regulator_pid, regulator_ref)
-#      end
-#    handle_command_reply(conn_id, transport, socket, in_buf, reply)
-#  end
-#
-#  defp handle_command_reply(conn_id, transport, socket, in_buf, reply) do
-#    case reply.() do
-#      {:finished, reply_data} ->
-#        write_to_socket(transport, socket, reply_data)
-#        loop(conn_id, transport, socket, in_buf)
-#      {:more, reply_data, reply} ->
-#        write_to_socket(transport, socket, reply_data)
-#        handle_command_reply(conn_id, transport, socket, in_buf, reply)
-#    end
-#  end
+  defp write_to_socket(transport, socket, data) do
+    case transport.send(socket, data) do
+      :ok ->
+        :ok
+      {:error, reason} ->
+        Logger.warn("Failed to write to socket: #{inspect reason}")
+        exit(:normal)
+    end
+  end
 end

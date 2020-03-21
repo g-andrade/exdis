@@ -39,11 +39,19 @@ defmodule Exdis.Database.KeyRegistry do
 
   def get_owner(key) do
     case :ets.lookup(@table, key) do
-      [{_, owner_pid}] ->
+      [{_, owner_pid, _}] ->
         owner_pid
       [] ->
         nil
     end
+  end
+
+  def mark_as_set(key) do
+    :ets.update_element(@table, key, {3, :set})
+  end
+
+  def mark_as_unset(key) do
+    :ets.update_element(@table, key, {3, :unset})
   end
 
   ## ------------------------------------------------------------------
@@ -86,27 +94,27 @@ defmodule Exdis.Database.KeyRegistry do
   ## ------------------------------------------------------------------
 
   def create_table() do
-    opts = [:named_table, :protected, read_concurrency: true]
+    opts = [:named_table, :public, read_concurrency: true]
     :ets.new(@table, opts)
   end
 
   def handle_owner_registration(key, owner_pid, state) do
-    case :ets.insert_new(@table, {key, owner_pid}) do
+    case :ets.insert_new(@table, {key, owner_pid, :unset}) do
       true ->
         Process.link(owner_pid)
         {:reply, {:ok, self()}, state}
       false ->
-        [{_, existing_owner_pid}] = :ets.lookup(@table, key)
+        [{_, existing_owner_pid, _}] = :ets.lookup(@table, key)
         {:reply, {:already_registered, existing_owner_pid}, state}
     end
   end
 
   def handle_owner_unregistration(key, alleged_owner_pid, state) do
     case :ets.take(@table, key) do
-      [{_, ^alleged_owner_pid}] ->
+      [{_, ^alleged_owner_pid, _}] ->
         Process.unlink(alleged_owner_pid)
         {:reply, :ok, state}
-      [{_, actual_owner_pid}] ->
+      [{_, actual_owner_pid, _}] ->
         error_reason = {:mismatched_owner_pid, actual_owner_pid}
         {:reply, {:error, error_reason}, state}
       [] ->
@@ -117,7 +125,7 @@ defmodule Exdis.Database.KeyRegistry do
 
   def handle_linked_process_death(pid, state) do
     # the following lookup can become terribly slow but it will only run for edge cases
-    match_spec = [{{'$1','$2'}, [{'=:=','$2',pid}], ['$1']}]
+    match_spec = [{{:"$1",:"$2",:_}, [{:"=:=",:"$2",pid}], [":$1"]}]
     case :ets.select(@table, match_spec) do
       [key] ->
         Logger.warn("Owner of key #{inspect key} stopped before unregistering")

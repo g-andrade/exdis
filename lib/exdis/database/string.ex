@@ -36,25 +36,22 @@ defmodule Exdis.Database.String do
   ## APPEND Command
   ## ------------------------------------------------------------------
 
-  def append(key, tail, reply_cb) do
-    Exdis.Database.KeyOwner.upsert(key,
-      &handle_append(&1, tail),
-      fn -> handle_init({:integer, byte_size(tail)}, :binary, tail) end,
-      reply_cb)
+  def append(key, tail) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_append(&1, tail))
   end
 
   defp handle_append(string() = state, tail) do
     case coerce_into_binary_or_iodata(state) do
       string(repr: :binary, value: value) = state ->
-        retval = {:integer, byte_size(value) + byte_size(tail)}
+        reply = {:integer, byte_size(value) + byte_size(tail)}
         value = [value, tail]
         state = string(state, repr: {:iodata, 1}, value: value)
-        {retval, state}
+        {:ok_and_update, reply, state}
       string(repr: {:iodata, depth}, value: value) = state ->
         value = [value, tail]
-        retval = {:integer, :erlang.iolist_size(value)}
+        reply = {:integer, :erlang.iolist_size(value)}
         state = string(state, repr: {:iodata, depth + 1}, value: value)
-        {retval, state}
+        {:ok_and_update, reply, state}
     end
   end
 
@@ -66,17 +63,21 @@ defmodule Exdis.Database.String do
   ## GET Command
   ## ------------------------------------------------------------------
 
-  def get(key, reply_cb) do
-    Exdis.Database.KeyOwner.read(key, &handle_get/1, nil, reply_cb)
+  def get(key) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_get/1)
   end
 
   defp handle_get(string() = state) do
     state = flatten_iodata(state)
     string(value: value) = coerce_into_binary(state)
-    {{:string, value}, state}
+    {:ok_and_update, {:string, value}, state}
   end
 
-  defp handle_get(state) when not Record.is_record(state, :string) do
+  defp handle_get(nil) do
+    {:ok, nil}
+  end
+
+  defp handle_get(_state) do
     {:error, :key_of_wrong_type}
   end
 
@@ -84,11 +85,8 @@ defmodule Exdis.Database.String do
   ## INCRBY Command
   ## ------------------------------------------------------------------
 
-  def increment_by(key, increment, reply_cb) do
-    Exdis.Database.KeyOwner.upsert(key,
-      &handle_increment_by(&1, increment),
-      fn -> handle_init({:integer, increment}, :integer, increment) end,
-      reply_cb)
+  def increment_by(key, increment) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_increment_by(&1, increment))
   end
 
   defp handle_increment_by(string() = state, increment) do
@@ -96,16 +94,14 @@ defmodule Exdis.Database.String do
       string(value: value) = state ->
         case value + increment do
           value when value >= @min_integer_value and value <= @max_integer_value ->
-            retval = {:integer, value}
+            reply = {:integer, value}
             state = string(state, value: value)
-            {retval, state}
+            {:ok_and_update, reply, state}
           _underflow_or_overflow ->
-            retval = {:error, :increment_or_decrement_would_overflow}
-            {retval, state}
+            {:error_and_update, :increment_or_decrement_would_overflow, state}
         end
       {:no, state} ->
-        retval = {:error, :value_not_an_integer_or_out_of_range}
-        {retval, state}
+        {:error_and_update, :value_not_an_integer_or_out_of_range, state}
     end
   end
 
@@ -113,14 +109,8 @@ defmodule Exdis.Database.String do
   ## INCRBYFLOAT Command
   ## ------------------------------------------------------------------
 
-  def increment_by_float(key, increment, reply_cb) do
-    Exdis.Database.KeyOwner.upsert(key,
-      &handle_increment_by_float(&1, increment),
-      fn ->
-        retval = {:string, float_to_output_string(increment)}
-        handle_init(retval, :float, increment)
-      end,
-      reply_cb)
+  def increment_by_float(key, increment) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_increment_by_float(&1, increment))
   end
 
   defp handle_increment_by_float(string() = state, increment) do
@@ -128,17 +118,15 @@ defmodule Exdis.Database.String do
       string(value: value) = state ->
         try do
           value = value + increment
-          retval = {:string, float_to_output_string(value)}
+          reply = {:string, float_to_output_string(value)}
           state = string(state, value: value)
-          {retval, state}
+          {:ok_and_update, reply, state}
         rescue
           _ in ArithmeticError ->
-            retval = {:error, :increment_would_produce_NaN_or_infinity}
-            {retval, state}
+            {:error_and_update, :increment_would_produce_NaN_or_infinity, state}
         end
       {:no, state} ->
-        retval = {:error, :value_not_a_valid_float}
-        {retval, state}
+        {:error_and_update, :value_not_a_valid_float, state}
     end
   end
 
@@ -146,24 +134,13 @@ defmodule Exdis.Database.String do
   ## SET Command
   ## ------------------------------------------------------------------
 
-  def set(key, value, reply_cb) do
-    Exdis.Database.KeyOwner.upsert(key,
-      &handle_set(&1, value),
-      fn -> handle_init(:ok, :binary, value) end,
-      reply_cb)
+  def set(key, value) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_set(&1, value))
   end
 
   defp handle_set(_state, new_value) do
-    state = string(value: new_value)
-    {:ok, state}
-  end
-
-  ## ------------------------------------------------------------------
-  ## Initialization
-  ## ------------------------------------------------------------------
-
-  defp handle_init(retval, repr, value) do
-    {retval, string(repr: repr, value: value)}
+    state = string(repr: :binary, value: new_value)
+    {:ok_and_update, state}
   end
 
   ## ------------------------------------------------------------------
