@@ -6,13 +6,13 @@ defmodule Exdis.IoData do
   ## Record and Type Definitions
   ## ------------------------------------------------------------------
 
-  Record.defrecord(:iodata,
+  Record.defrecord(:io_data,
     bytes: nil,
     size: nil,
     fragments: nil
   )
 
-  @opaque t :: record(:iodata,
+  @opaque t :: record(:io_data,
     bytes: iodata,
     size: non_neg_integer,
     fragments: non_neg_integer)
@@ -21,30 +21,30 @@ defmodule Exdis.IoData do
   ## API Functions
   ## ------------------------------------------------------------------
 
-  def append(iodata(bytes: bytes, size: size, fragments: fragments) = iodata, tail_bytes) do
+  def append(io_data(bytes: bytes, size: size, fragments: fragments) = io_data, tail_bytes) do
     {tail_size, tail_fragments} = count_size_and_fragments(tail_bytes)
-    iodata(iodata,
+    io_data(io_data,
       bytes: [bytes, tail_bytes],
       size: size + tail_size,
       fragments: fragments + tail_fragments)
   end
 
-  def bytes(iodata(bytes: bytes)), do: bytes
+  def bytes(io_data(bytes: bytes)), do: bytes
 
-  def flatten(iodata(bytes: bytes, size: size) = iodata) do
+  def flatten(io_data(bytes: bytes, size: size) = io_data) do
     binary = :erlang.iolist_to_binary(bytes)
     ^size = byte_size(binary)
-    iodata(iodata, bytes: binary, size: size, fragments: 1)
+    io_data(io_data, bytes: binary, size: size, fragments: 1)
   end
 
-  def fragments(iodata(fragments: fragments)), do: fragments
+  def fragments(io_data(fragments: fragments)), do: fragments
 
   # optimization
-  def get_bit(iodata(size: size), offset) when offset >= size * 8 do
+  def get_bit(io_data(size: size), offset) when offset >= size * 8 do
     0
   end
 
-  def get_bit(iodata(bytes: bytes), offset) when offset >= 0 do
+  def get_bit(io_data(bytes: bytes), offset) when offset >= 0 do
     case find_bit_recur(bytes, offset) do
       {:found, bit_value} ->
         bit_value
@@ -53,7 +53,7 @@ defmodule Exdis.IoData do
     end
   end
 
-  def get_range(iodata(bytes: bytes, size: size), start, finish) do
+  def get_range(io_data(bytes: bytes, size: size), start, finish) do
     start = max(0, normalize_byte_offset(start, size))
     finish = min(size - 1, normalize_byte_offset(finish, size))
 
@@ -69,13 +69,13 @@ defmodule Exdis.IoData do
 
   def new(bytes) do
     {size, fragments} = count_size_and_fragments(bytes)
-    iodata(
+    io_data(
       bytes: bytes,
       size: size,
       fragments: fragments)
   end
 
-  def size(iodata(size: size)), do: size
+  def size(io_data(size: size)), do: size
 
   ## ------------------------------------------------------------------
   ## Private Function: count_size_and_fragments
