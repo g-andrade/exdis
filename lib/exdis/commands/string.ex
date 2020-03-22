@@ -171,6 +171,18 @@ defmodule Exdis.Commands.String do
   end
 
   ## ------------------------------------------------------------------
+  ## STRLEN Command
+  ## ------------------------------------------------------------------
+
+  def str_length([{:string, key}]) do
+    Exdis.Database.String.str_length(key)
+  end
+
+  def str_length(_) do
+    {:error, :bad_syntax}
+  end
+
+  ## ------------------------------------------------------------------
   ## RESP Type Coercion - To String
   ## ------------------------------------------------------------------
 

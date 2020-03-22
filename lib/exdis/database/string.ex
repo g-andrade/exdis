@@ -274,6 +274,42 @@ defmodule Exdis.Database.String do
   end
 
   ## ------------------------------------------------------------------
+  ## STRLEN Command
+  ## ------------------------------------------------------------------
+
+  def str_length(key) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_str_length/1)
+  end
+
+  defp handle_str_length(string(repr: repr, value: value)) do
+    case repr do
+      :iodata ->
+        value_string_length = Exdis.IoData.size(value)
+        reply = {:integer, value_string_length}
+        {:ok, reply}
+      :integer ->
+        value_string = Integer.to_string(value)
+        value_string_length = byte_size(value_string)
+        reply = {:integer, value_string_length}
+        {:ok, reply}
+      :float ->
+        value_string = float_to_output_string(value)
+        value_string_length = byte_size(value_string)
+        reply = {:integer, value_string_length}
+        {:ok, reply}
+    end
+  end
+
+  defp handle_str_length(nil) do
+    reply = {:integer, 0}
+    {:ok, reply}
+  end
+
+  defp handle_str_length(_state) do
+    {:error, :key_of_wrong_type}
+  end
+
+  ## ------------------------------------------------------------------
   ## Type Coercion - To Integer
   ## ------------------------------------------------------------------
 

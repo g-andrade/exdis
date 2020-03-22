@@ -34,7 +34,8 @@ defmodule Exdis.Command do
       "INCR" => &Exdis.Commands.String.increment/1,
       "INCRBY" => &Exdis.Commands.String.increment_by/1,
       "INCRBYFLOAT" => &Exdis.Commands.String.increment_by_float/1,
-      "SET" => &Exdis.Commands.String.set/1
+      "SET" => &Exdis.Commands.String.set/1,
+      "STRLEN" => &Exdis.Commands.String.str_length/1
     }
   end
 
