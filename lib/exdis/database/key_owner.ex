@@ -149,7 +149,7 @@ defmodule Exdis.Database.KeyOwner do
         :gen_server.enter_loop(__MODULE__, @gen_server_opts, state)
 
       {:"DOWN", ^lock_owner_mon, _, _, _} ->
-        :ok = Exdis.Database.KeyRegistry.unregister_owner(self(), key)
+        :ok = Exdis.Database.KeyRegistry.unregister_owner(registry_pid, key)
         exit(:normal)
     end
   end
@@ -199,12 +199,21 @@ defmodule Exdis.Database.KeyOwner do
   end
 
   def handle_info({:"EXIT", pid, _}, state(registry_pid: pid) = state) do
-    {:stop, :normal, state}
+    {:stop, :shutdown, state}
   end
 
   def handle_info(info, state) do
     {:stop, {:unexpected_info, info}, state}
   end
+
+
+  def terminate(reason, state) when reason !== :shutdown do
+    state(key: key, registry_pid: registry_pid) = state
+    :ok = Exdis.Database.KeyRegistry.unregister_owner(registry_pid, key)
+  end
+
+  def terminate(_reason, _state), do: :ok
+
 
   ## ------------------------------------------------------------------
   ## Private Function Definitions

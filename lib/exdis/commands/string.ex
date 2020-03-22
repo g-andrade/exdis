@@ -32,7 +32,7 @@ defmodule Exdis.Commands.String do
       decrement when is_integer(decrement) ->
         Exdis.Database.String.increment_by(key, -decrement)
       :no ->
-        {:error, :value_not_an_integer_or_out_of_range}
+        {:error, {:not_an_integer_or_out_of_range, "value"}}
     end
   end
 
@@ -49,6 +49,42 @@ defmodule Exdis.Commands.String do
   end
 
   def get(_) do
+    {:error, :bad_syntax}
+  end
+
+  ## ------------------------------------------------------------------
+  ## GETBIT Command
+  ## ------------------------------------------------------------------
+
+  def get_bit([{:string, key}, resp_offset]) do
+    case maybe_coerce_resp_value_into_integer(resp_offset) do
+      offset when is_integer(offset) and offset >= 0 ->
+        Exdis.Database.String.get_bit(key, offset)
+      _ ->
+        {:error, {:not_an_integer_or_out_of_range, "bit offset"}}
+    end
+  end
+
+  def get_bit(_) do
+    {:error, :bad_syntax}
+  end
+
+  ## ------------------------------------------------------------------
+  ## GETRANGE Command
+  ## ------------------------------------------------------------------
+
+  def get_range([{:string, key}, resp_start, resp_finish]) do
+    case {maybe_coerce_resp_value_into_integer(resp_start),
+          maybe_coerce_resp_value_into_integer(resp_finish)}
+    do
+      {start, finish} when is_integer(start) and is_integer(finish) ->
+        Exdis.Database.String.get_range(key, start, finish)
+      _ ->
+        {:error, {:not_an_integer_or_out_of_range, "value"}}
+    end
+  end
+
+  def get_range(_) do
     {:error, :bad_syntax}
   end
 
@@ -73,7 +109,7 @@ defmodule Exdis.Commands.String do
       increment when is_integer(increment) ->
         Exdis.Database.String.increment_by(key, +increment)
       :no ->
-        {:error, :value_not_an_integer_or_out_of_range}
+        {:error, {:not_an_integer_or_out_of_range, "value"}}
     end
   end
 
@@ -90,7 +126,7 @@ defmodule Exdis.Commands.String do
       increment when is_float(increment) ->
         Exdis.Database.String.increment_by_float(key, +increment)
       :no ->
-        {:error, :value_not_a_valid_float}
+        {:error, {:not_a_valid_float, "value"}}
     end
   end
 
@@ -162,7 +198,10 @@ defmodule Exdis.Commands.String do
   ## ------------------------------------------------------------------
 
   defp maybe_coerce_resp_value_into_float({:string, string}) do
-    case Float.parse(string) do
+    case (
+      byte_size(string) <= Exdis.Database.String.max_float_value_str_length()
+      and Float.parse(string))
+    do
       {float, ""} ->
         float
       _ ->

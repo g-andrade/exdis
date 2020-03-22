@@ -125,7 +125,7 @@ defmodule Exdis.Database.KeyRegistry do
 
   def handle_linked_process_death(pid, state) do
     # the following lookup can become terribly slow but it will only run for edge cases
-    match_spec = [{{:"$1",:"$2",:_}, [{:"=:=",:"$2",pid}], [":$1"]}]
+    match_spec = [{{:"$1",:"$2",:_}, [{:"=:=",:"$2",pid}], [:"$1"]}]
     case :ets.select(@table, match_spec) do
       [key] ->
         Logger.warn("Owner of key #{inspect key} stopped before unregistering")

@@ -9,14 +9,23 @@ defmodule Exdis.Database.String do
   @min_integer_value (-(1 <<< 63))
   @max_integer_value ((1 <<< 63) - 1)
 
+  @max_iodata_fragments_upon_read 100
+
   ## ------------------------------------------------------------------
   ## Type and Record Definitions
   ## ------------------------------------------------------------------
 
   Record.defrecord(:string,
-    repr: :binary,
+    repr: nil,
     value: nil
   )
+
+  @opaque state :: iodata_state | integer_state | float_state
+  @typep iodata_state :: state(:iodata, Exdis.IoData.t)
+  @typep integer_state :: state(:integer, integer)
+  @typep float_state :: state(:float, float)
+
+  @typep state(repr, value) :: record(:string, repr: repr, value: value)
 
   ## ------------------------------------------------------------------
   ## Utilities
@@ -32,6 +41,11 @@ defmodule Exdis.Database.String do
     max(byte_size(str_min), byte_size(str_max) + 1) # +1 for an optional plus sign
   end
 
+  def max_float_value_str_length() do
+    # the DBL_MAX_10_EXP constant in `float.h`
+    308
+  end
+
   ## ------------------------------------------------------------------
   ## APPEND Command
   ## ------------------------------------------------------------------
@@ -41,18 +55,21 @@ defmodule Exdis.Database.String do
   end
 
   defp handle_append(string() = state, tail) do
-    case coerce_into_binary_or_iodata(state) do
-      string(repr: :binary, value: value) = state ->
-        reply = {:integer, byte_size(value) + byte_size(tail)}
-        value = [value, tail]
-        state = string(state, repr: {:iodata, 1}, value: value)
-        {:ok_and_update, reply, state}
-      string(repr: {:iodata, depth}, value: value) = state ->
-        value = [value, tail]
-        reply = {:integer, :erlang.iolist_size(value)}
-        state = string(state, repr: {:iodata, depth + 1}, value: value)
-        {:ok_and_update, reply, state}
-    end
+    state = coerce_into_iodata(state)
+    string(repr: :iodata, value: value) = state
+    value = Exdis.IoData.append(value, tail)
+    size_after_append = Exdis.IoData.size(value)
+    reply = {:integer, size_after_append}
+    state = string(state, value: value)
+    {:ok_and_update, reply, state}
+  end
+
+  defp handle_append(nil, tail) do
+    value = Exdis.IoData.new(tail)
+    size_after_append = Exdis.IoData.size(value)
+    reply = {:integer, size_after_append}
+    state = string(repr: :iodata, value: value)
+    {:ok_and_update, reply, state}
   end
 
   defp handle_append(_state, _tail) do
@@ -68,9 +85,22 @@ defmodule Exdis.Database.String do
   end
 
   defp handle_get(string() = state) do
-    state = flatten_iodata(state)
-    string(value: value) = coerce_into_binary(state)
-    {:ok_and_update, {:string, value}, state}
+    case maybe_flatten_iodata(state, @max_iodata_fragments_upon_read) do
+      string(repr: :iodata, value: value) = state ->
+        reply_string = Exdis.IoData.bytes(value)
+        reply = {:string, reply_string}
+        {:ok_and_update, reply, state}
+
+      string(repr: :integer, value: value) ->
+        reply_string = Integer.to_string(value)
+        reply = {:string, reply_string}
+        {:ok, reply}
+
+      string(repr: :float, value: value) ->
+        reply_string = float_to_output_string(value)
+        reply = {:string, reply_string}
+        {:ok, reply}
+    end
   end
 
   defp handle_get(nil) do
@@ -78,6 +108,56 @@ defmodule Exdis.Database.String do
   end
 
   defp handle_get(_state) do
+    {:error, :key_of_wrong_type}
+  end
+
+  ## ------------------------------------------------------------------
+  ## GETBIT Command
+  ## ------------------------------------------------------------------
+
+  def get_bit(key, offset) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_get_bit(&1, offset))
+  end
+
+  defp handle_get_bit(string() = state, offset) do
+    state = coerce_into_iodata(state)
+    string(value: value) = state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
+    bit_value = Exdis.IoData.get_bit(value, offset)
+    reply = {:integer, bit_value}
+    {:ok_and_update, reply, state}
+  end
+
+  defp handle_get_bit(nil, _offset) do
+    reply = {:integer, 0}
+    {:ok, reply}
+  end
+
+  defp handle_get_bit(_state, _offset) do
+    {:error, :key_of_wrong_type}
+  end
+
+  ## ------------------------------------------------------------------
+  ## GETRANGE Command
+  ## ------------------------------------------------------------------
+
+  def get_range(key, start, finish) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_get_range(&1, start, finish))
+  end
+
+  defp handle_get_range(string() = state, start, finish) do
+    state = coerce_into_iodata(state)
+    string(value: value) = state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
+    reply_string = Exdis.IoData.get_range(value, start, finish)
+    reply = {:string, reply_string}
+    {:ok_and_update, reply, state}
+  end
+
+  defp handle_get_range(nil, _start, _finish) do
+    reply = {:string, ""}
+    {:ok, reply}
+  end
+
+  defp handle_get_range(_state, _start, _finish) do
     {:error, :key_of_wrong_type}
   end
 
@@ -91,7 +171,7 @@ defmodule Exdis.Database.String do
 
   defp handle_increment_by(string() = state, increment) do
     case maybe_coerce_into_integer(state) do
-      string(value: value) = state ->
+      string(repr: :integer, value: value) = state ->
         case value + increment do
           value when value >= @min_integer_value and value <= @max_integer_value ->
             reply = {:integer, value}
@@ -100,9 +180,19 @@ defmodule Exdis.Database.String do
           _underflow_or_overflow ->
             {:error_and_update, :increment_or_decrement_would_overflow, state}
         end
-      {:no, state} ->
+      state ->
         {:error_and_update, :value_not_an_integer_or_out_of_range, state}
     end
+  end
+
+  defp handle_increment_by(nil, increment) do
+    reply = {:integer, increment}
+    state = string(repr: :integer, value: increment)
+    {:ok_and_update, reply, state}
+  end
+
+  defp handle_increment_by(_state, _increment) do
+    {:error, :key_of_wrong_type}
   end
 
   ## ------------------------------------------------------------------
@@ -115,7 +205,7 @@ defmodule Exdis.Database.String do
 
   defp handle_increment_by_float(string() = state, increment) do
     case maybe_coerce_into_float(state) do
-      string(value: value) = state ->
+      string(repr: :float, value: value) = state ->
         try do
           value = value + increment
           reply = {:string, float_to_output_string(value)}
@@ -125,9 +215,19 @@ defmodule Exdis.Database.String do
           _ in ArithmeticError ->
             {:error_and_update, :increment_would_produce_NaN_or_infinity, state}
         end
-      {:no, state} ->
+      state ->
         {:error_and_update, :value_not_a_valid_float, state}
     end
+  end
+
+  defp handle_increment_by_float(nil, increment) do
+    reply = {:string, float_to_output_string(increment)}
+    state = string(repr: :float, value: increment)
+    {:ok_and_update, reply, state}
+  end
+
+  defp handle_increment_by_float(_state, _increment) do
+    {:error, :key_of_wrong_type}
   end
 
   ## ------------------------------------------------------------------
@@ -138,8 +238,9 @@ defmodule Exdis.Database.String do
     Exdis.Database.KeyOwner.manipulate(key, &handle_set(&1, value))
   end
 
-  defp handle_set(_state, new_value) do
-    state = string(repr: :binary, value: new_value)
+  defp handle_set(_state, bytes) do
+    value = Exdis.IoData.new(bytes)
+    state = string(repr: :iodata, value: value)
     {:ok_and_update, state}
   end
 
@@ -151,19 +252,20 @@ defmodule Exdis.Database.String do
     state
   end
 
-  defp maybe_coerce_into_integer(string(repr: :binary, value: value) = state) do
-    case byte_size(value) < max_integer_value_str_length() and Integer.parse(value) do
-      {integer, ""} when integer >= @min_integer_value and integer <= @max_integer_value ->
-        string(state, repr: :integer, value: integer)
-      _ ->
-        {:no, state}
+  defp maybe_coerce_into_integer(string(repr: :iodata, value: value) = state) do
+    case Exdis.IoData.size(value) <= max_integer_value_str_length() do
+      true ->
+        value = Exdis.IoData.flatten(value)
+        bytes = Exdis.IoData.bytes(value)
+        case Integer.parse(bytes) do
+          {integer, ""} when integer >= @min_integer_value and integer <= @max_integer_value ->
+            string(state, repr: :integer, value: integer)
+          _ ->
+            string(value: value)
+        end
+      false ->
+        state
     end
-  end
-
-  defp maybe_coerce_into_integer(string(repr: {:iodata,_}, value: value) = state) do
-    binary = :erlang.iolist_to_binary(value)
-    state = string(state, repr: :binary, value: binary)
-    maybe_coerce_into_integer(state)
   end
 
   defp maybe_coerce_into_integer(string(repr: :float, value: value) = state) do
@@ -171,7 +273,7 @@ defmodule Exdis.Database.String do
       integer when integer == value ->
         string(state, repr: :integer, value: integer)
       _ ->
-        {:no, state}
+        state
     end
   end
 
@@ -189,23 +291,24 @@ defmodule Exdis.Database.String do
         string(state, repr: :float, value: value)
       _ ->
         # loss of precision
-        {:no, state}
+        state
     end
   end
 
-  defp maybe_coerce_into_float(string(repr: :binary, value: value) = state) do
-    case Float.parse(value) do
-      {float, ""} ->
-        string(state, repr: :float, value: float)
-      _ ->
-        {:no, state}
+  defp maybe_coerce_into_float(string(repr: :iodata, value: value) = state) do
+    case Exdis.IoData.size(value) <= max_float_value_str_length() do
+      true ->
+        value = Exdis.IoData.flatten(value)
+        bytes = Exdis.IoData.bytes(value)
+        case Float.parse(bytes) do
+          {float, ""} ->
+            string(state, repr: :float, value: float)
+          _ ->
+            string(value: value)
+        end
+      false ->
+        state
     end
-  end
-
-  defp maybe_coerce_into_float(string(repr: {:iodata,_}, value: value) = state) do
-    binary = :erlang.iolist_to_binary(value)
-    state = string(state, repr: :binary, value: binary)
-    maybe_coerce_into_float(state)
   end
 
 
@@ -222,51 +325,35 @@ defmodule Exdis.Database.String do
   ## Type Coercion - I/O data flattening
   ## ------------------------------------------------------------------
 
-  defp flatten_iodata(string(repr: :binary) = state) do
-    state
+  defp maybe_flatten_iodata(string(repr: :iodata, value: value) = state, max_fragments) do
+    case Exdis.IoData.fragments(value) > max_fragments do
+      true ->
+        value = Exdis.IoData.flatten(value)
+        string(state, value: value)
+      false ->
+        state
+    end
   end
 
-  defp flatten_iodata(string(repr: {:iodata,_}, value: value) = state) do
-    binary = :erlang.iolist_to_binary(value)
-    string(state, repr: :binary, value: binary)
-  end
-
-  defp flatten_iodata(state) do
+  defp maybe_flatten_iodata(state, _max_fragments) do
     state
   end
 
   ## ------------------------------------------------------------------
-  ## Type Coercion - To Binary
+  ## Type Coercion - To I/O Data
   ## ------------------------------------------------------------------
 
-  defp coerce_into_binary(string(repr: :binary) = state) do
+  defp coerce_into_iodata(string(repr: :iodata) = state) do
     state
   end
 
-  defp coerce_into_binary(string(repr: {:iodata,_}, value: value) = state) do
-    binary = :erlang.iolist_to_binary(value)
-    string(state, repr: :binary, value: binary)
-  end
-
-  defp coerce_into_binary(string(repr: :integer, value: value) = state) do
+  defp coerce_into_iodata(string(repr: :integer, value: value) = state) do
     binary = Integer.to_string(value)
     string(state, repr: :binary, value: binary)
   end
 
-  defp coerce_into_binary(string(repr: :float, value: value) = state) do
+  defp coerce_into_iodata(string(repr: :float, value: value) = state) do
     binary = float_to_output_string(value)
     string(state, repr: :binary, value: binary)
-  end
-
-  ## ------------------------------------------------------------------
-  ## Type Coercion - To Binary Or I/O data
-  ## ------------------------------------------------------------------
-
-  defp coerce_into_binary_or_iodata(string(repr: {:iodata,_}) = state) do
-    state
-  end
-
-  defp coerce_into_binary_or_iodata(state) do
-    coerce_into_binary(state)
   end
 end

@@ -28,6 +28,8 @@ defmodule Exdis.Command do
       "DECR" => &Exdis.Commands.String.decrement/1,
       "DECRBY" => &Exdis.Commands.String.decrement_by/1,
       "GET" => &Exdis.Commands.String.get/1,
+      "GETBIT" => &Exdis.Commands.String.get_bit/1,
+      "GETRANGE" => &Exdis.Commands.String.get_range/1,
       "INCR" => &Exdis.Commands.String.increment/1,
       "INCRBY" => &Exdis.Commands.String.increment_by/1,
       "INCRBYFLOAT" => &Exdis.Commands.String.increment_by_float/1,
