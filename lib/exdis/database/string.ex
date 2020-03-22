@@ -87,18 +87,18 @@ defmodule Exdis.Database.String do
   defp handle_get(string() = state) do
     case maybe_flatten_iodata(state, @max_iodata_fragments_upon_read) do
       string(repr: :iodata, value: value) = state ->
-        reply_string = Exdis.IoData.bytes(value)
-        reply = {:string, reply_string}
+        value_string = Exdis.IoData.bytes(value)
+        reply = {:string, value_string}
         {:ok_and_update, reply, state}
 
       string(repr: :integer, value: value) ->
-        reply_string = Integer.to_string(value)
-        reply = {:string, reply_string}
+        value_string = Integer.to_string(value)
+        reply = {:string, value_string}
         {:ok, reply}
 
       string(repr: :float, value: value) ->
-        reply_string = float_to_output_string(value)
-        reply = {:string, reply_string}
+        value_string = float_to_output_string(value)
+        reply = {:string, value_string}
         {:ok, reply}
     end
   end
@@ -147,8 +147,8 @@ defmodule Exdis.Database.String do
   defp handle_get_range(string() = state, start, finish) do
     state = coerce_into_iodata(state)
     string(value: value) = state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
-    reply_string = Exdis.IoData.get_range(value, start, finish)
-    reply = {:string, reply_string}
+    value_string = Exdis.IoData.get_range(value, start, finish)
+    reply = {:string, value_string}
     {:ok_and_update, reply, state}
   end
 
