@@ -91,6 +91,23 @@ defmodule Exdis.Commands.String do
   end
 
   ## ------------------------------------------------------------------
+  ## GETSET Command
+  ## ------------------------------------------------------------------
+
+  def get_set([{:string, key}, resp_value]) do
+    case maybe_coerce_resp_value_into_string(resp_value) do
+      <<value :: bytes>> ->
+        Exdis.Database.String.get_set(key, value)
+      :no ->
+        {:error, :bad_syntax}
+    end
+  end
+
+  def get_set(_) do
+    {:error, :bad_syntax}
+  end
+
+  ## ------------------------------------------------------------------
   ## INCR Command
   ## ------------------------------------------------------------------
 

@@ -30,6 +30,7 @@ defmodule Exdis.Command do
       "GET" => &Exdis.Commands.String.get/1,
       "GETBIT" => &Exdis.Commands.String.get_bit/1,
       "GETRANGE" => &Exdis.Commands.String.get_range/1,
+      "GETSET" => &Exdis.Commands.String.get_set/1,
       "INCR" => &Exdis.Commands.String.increment/1,
       "INCRBY" => &Exdis.Commands.String.increment_by/1,
       "INCRBYFLOAT" => &Exdis.Commands.String.increment_by_float/1,

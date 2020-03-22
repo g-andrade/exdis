@@ -162,6 +162,35 @@ defmodule Exdis.Database.String do
   end
 
   ## ------------------------------------------------------------------
+  ## GETSET Command
+  ## ------------------------------------------------------------------
+
+  def get_set(key, value) do
+    Exdis.Database.KeyOwner.manipulate(key, &handle_get_set(&1, value))
+  end
+
+  defp handle_get_set(string() = state, new_bytes) do
+    state = coerce_into_iodata(state)
+    string(repr: :iodata, value: old_value) = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
+    old_bytes = Exdis.IoData.bytes(old_value)
+    reply = {:string, old_bytes}
+
+    new_value = Exdis.IoData.new(new_bytes)
+    new_state = string(repr: :iodata, value: new_value)
+    {:ok_and_update, reply, new_state}
+  end
+
+  defp handle_get_set(nil, bytes) do
+    value = Exdis.IoData.new(bytes)
+    state = string(repr: :iodata, value: value)
+    {:ok_and_update, nil, state}
+  end
+
+  defp handle_get_set(_state, _new_bytes) do
+    {:error, :key_of_wrong_type}
+  end
+
+  ## ------------------------------------------------------------------
   ## INCRBY Command
   ## ------------------------------------------------------------------
 
