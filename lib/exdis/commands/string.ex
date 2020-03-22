@@ -32,7 +32,7 @@ defmodule Exdis.Commands.String do
       decrement when is_integer(decrement) ->
         Exdis.Database.String.increment_by(key, -decrement)
       :no ->
-        {:error, {:not_an_integer_or_out_of_range, "value"}}
+        {:error, {:not_an_integer_or_out_of_range, "decrement"}}
     end
   end
 
@@ -79,8 +79,10 @@ defmodule Exdis.Commands.String do
     do
       {start, finish} when is_integer(start) and is_integer(finish) ->
         Exdis.Database.String.get_range(key, start, finish)
-      _ ->
-        {:error, {:not_an_integer_or_out_of_range, "value"}}
+      {nil, _} ->
+        {:error, {:not_an_integer_or_out_of_range, "start"}}
+      {_, nil} ->
+        {:error, {:not_an_integer_or_out_of_range, "end"}}
     end
   end
 
@@ -109,7 +111,7 @@ defmodule Exdis.Commands.String do
       increment when is_integer(increment) ->
         Exdis.Database.String.increment_by(key, +increment)
       :no ->
-        {:error, {:not_an_integer_or_out_of_range, "value"}}
+        {:error, {:not_an_integer_or_out_of_range, "increment"}}
     end
   end
 
@@ -126,7 +128,7 @@ defmodule Exdis.Commands.String do
       increment when is_float(increment) ->
         Exdis.Database.String.increment_by_float(key, +increment)
       :no ->
-        {:error, {:not_a_valid_float, "value"}}
+        {:error, {:not_a_valid_float, "increment"}}
     end
   end
 

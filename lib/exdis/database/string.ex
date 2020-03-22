@@ -181,7 +181,7 @@ defmodule Exdis.Database.String do
             {:error_and_update, :increment_or_decrement_would_overflow, state}
         end
       state ->
-        {:error_and_update, :value_not_an_integer_or_out_of_range, state}
+        {:error_and_update, {:not_an_integer_or_out_of_range, "value"}, state}
     end
   end
 
@@ -216,7 +216,7 @@ defmodule Exdis.Database.String do
             {:error_and_update, :increment_would_produce_NaN_or_infinity, state}
         end
       state ->
-        {:error_and_update, :value_not_a_valid_float, state}
+        {:error_and_update, {:not_a_valid_float, "value"}, state}
     end
   end
 
@@ -261,7 +261,7 @@ defmodule Exdis.Database.String do
           {integer, ""} when integer >= @min_integer_value and integer <= @max_integer_value ->
             string(state, repr: :integer, value: integer)
           _ ->
-            string(value: value)
+            string(state, value: value)
         end
       false ->
         state
@@ -304,7 +304,7 @@ defmodule Exdis.Database.String do
           {float, ""} ->
             string(state, repr: :float, value: float)
           _ ->
-            string(value: value)
+            string(state, value: value)
         end
       false ->
         state
@@ -348,12 +348,14 @@ defmodule Exdis.Database.String do
   end
 
   defp coerce_into_iodata(string(repr: :integer, value: value) = state) do
-    binary = Integer.to_string(value)
-    string(state, repr: :binary, value: binary)
+    bytes = Integer.to_string(value)
+    new_value = Exdis.IoData.new(bytes)
+    string(state, repr: :iodata, value: new_value)
   end
 
   defp coerce_into_iodata(string(repr: :float, value: value) = state) do
-    binary = float_to_output_string(value)
-    string(state, repr: :binary, value: binary)
+    bytes = float_to_output_string(value)
+    new_value = Exdis.IoData.new(bytes)
+    string(state, repr: :iodata, value: new_value)
   end
 end
