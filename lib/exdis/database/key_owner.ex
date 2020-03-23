@@ -68,13 +68,22 @@ defmodule Exdis.Database.KeyOwner do
     end
   end
 
+  def manipulate_if_set(database, key, manipulation_cb, result_otherwise) do
+    try do
+      manipulate(database, key, manipulation_cb)
+    catch
+      :error, %KeyError{term: ^database, key: ^key} ->
+        result_otherwise
+    end
+  end
+
   ## ------------------------------------------------------------------
   ## Low Level API
   ## ------------------------------------------------------------------
 
-  def acquire_lock(database, key, retries_left \\ 2) do
+  def acquire_lock(database, key, start_if_unset \\ true, retries_left \\ 2) do
     case Exdis.Database.KeyRegistry.get_owner(database, key) do
-      nil ->
+      nil when start_if_unset ->
         lock_ref_transfer_ref = make_ref()
         case start_and_acquire_lock(database, key, self(), lock_ref_transfer_ref) do
           {:ok, pid} ->
@@ -82,10 +91,14 @@ defmodule Exdis.Database.KeyOwner do
             send(pid, {lock_ref_transfer_ref , lock_ref})
             {lock_ref, pid}
           {:error, {:already_registered, _}} when retries_left > 0 ->
-            acquire_lock(database, key, retries_left - 1)
+            acquire_lock(database, key, start_if_unset, retries_left - 1)
           {:error, reason} ->
-            exit({reason, {__MODULE__, :acquire_lock, [database, key, retries_left]}})
+            args = [database, key, start_if_unset, retries_left]
+            exit({reason, {__MODULE__, :acquire_lock, args}})
         end
+
+      nil ->
+        raise KeyError, term: database, key: key
 
       pid ->
         lock_ref = Process.monitor(pid)
@@ -96,9 +109,10 @@ defmodule Exdis.Database.KeyOwner do
           {:"DOWN", ^lock_ref, _, _, reason} ->
             case reason in [:noproc, :normal] and retries_left > 0 do
               true ->
-                acquire_lock(database, key, retries_left - 1)
+                acquire_lock(database, key, start_if_unset, retries_left - 1)
               false ->
-                exit({reason, {__MODULE__, :acquire_lock, [database, key, retries_left]}})
+                args = [database, key, start_if_unset, retries_left]
+                exit({reason, {__MODULE__, :acquire_lock, args}})
             end
         end
     end

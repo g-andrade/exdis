@@ -24,6 +24,13 @@ defmodule Exdis.Command do
 
   defp known_command_handlers() do
     %{
+      # Keys
+      "KEYS" => &Exdis.Commands.Keys.keys/2,
+
+      # Server
+      "FLUSHDB" => &Exdis.Commands.Server.flush_db/2,
+
+      # String commands
       "APPEND" => &Exdis.Commands.String.append/2,
       "DECR" => &Exdis.Commands.String.decrement/2,
       "DECRBY" => &Exdis.Commands.String.decrement_by/2,

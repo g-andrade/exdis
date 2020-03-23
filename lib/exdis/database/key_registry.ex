@@ -43,6 +43,25 @@ defmodule Exdis.Database.KeyRegistry do
     GenServer.call(pid, {:unregister_owner, key}, :infinity)
   end
 
+  def for_each_key(database, fun) do
+    %{key_registry_table: table} = database
+    :ets.foldl(
+      fn {key, _pid, _set}, _ ->
+        fun.(key)
+        :ok
+      end,
+      :ok, table)
+  end
+
+  def reduce_keys(database, acc, fun) do
+    %{key_registry_table: table} = database
+    :ets.foldl(
+      fn {key, _pid, _set}, acc ->
+        fun.(key, acc)
+      end,
+      acc, table)
+  end
+
 #  def mark_as_set(database, key) do
 #    :ets.update_element(key, {3, :set})
 #  end
