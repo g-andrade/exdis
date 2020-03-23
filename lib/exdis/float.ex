@@ -31,7 +31,7 @@ defmodule Exdis.Float do
 
   def from_decimal_string(string) do
     case (
-      byte_size(string) < @max_decimal_string_length 
+      byte_size(string) < @max_decimal_string_length
       and Float.parse(string))
     do
       {float, ""} ->

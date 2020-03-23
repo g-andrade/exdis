@@ -34,7 +34,7 @@ defmodule Exdis.Int64 do
 
   def from_decimal_string(string) do
     case (
-      byte_size(string) < @max_decimal_string_length 
+      byte_size(string) < @max_decimal_string_length
       and Integer.parse(string))
     do
       {integer, ""} when integer >= @min and integer <= @max ->
