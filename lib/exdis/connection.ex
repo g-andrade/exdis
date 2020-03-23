@@ -105,7 +105,8 @@ defmodule Exdis.Connection do
   end
 
   defp handle_command(conn_id, transport, socket, in_buf, command) do
-    case Exdis.Command.handle(command) do
+    database = Exdis.DatabaseRegistry.get_database() # TODO
+    case Exdis.Command.handle(database, command) do
       :ok ->
         send_whole_command_reply(transport, socket, :ok)
         loop(conn_id, transport, socket, in_buf)

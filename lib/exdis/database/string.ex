@@ -28,8 +28,8 @@ defmodule Exdis.Database.String do
   ## APPEND Command
   ## ------------------------------------------------------------------
 
-  def append(key, tail) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_append(&1, tail))
+  def append(database, key, tail) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_append(&1, tail))
   end
 
   defp handle_append(string() = state, tail) do
@@ -58,8 +58,8 @@ defmodule Exdis.Database.String do
   ## GET Command
   ## ------------------------------------------------------------------
 
-  def get(key) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_get/1)
+  def get(database, key) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_get/1)
   end
 
   defp handle_get(string() = state) do
@@ -93,8 +93,8 @@ defmodule Exdis.Database.String do
   ## GETBIT Command
   ## ------------------------------------------------------------------
 
-  def get_bit(key, offset) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_get_bit(&1, offset))
+  def get_bit(database, key, offset) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_get_bit(&1, offset))
   end
 
   defp handle_get_bit(string() = state, offset) do
@@ -118,8 +118,8 @@ defmodule Exdis.Database.String do
   ## GETRANGE Command
   ## ------------------------------------------------------------------
 
-  def get_range(key, start, finish) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_get_range(&1, start, finish))
+  def get_range(database, key, start, finish) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_get_range(&1, start, finish))
   end
 
   defp handle_get_range(string() = state, start, finish) do
@@ -143,8 +143,8 @@ defmodule Exdis.Database.String do
   ## GETSET Command
   ## ------------------------------------------------------------------
 
-  def get_set(key, value) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_get_set(&1, value))
+  def get_set(database, key, value) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_get_set(&1, value))
   end
 
   defp handle_get_set(string() = state, new_bytes) do
@@ -172,8 +172,8 @@ defmodule Exdis.Database.String do
   ## INCRBY Command
   ## ------------------------------------------------------------------
 
-  def increment_by(key, increment) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_increment_by(&1, increment))
+  def increment_by(database, key, increment) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_increment_by(&1, increment))
   end
 
   defp handle_increment_by(string() = state, increment) do
@@ -206,8 +206,8 @@ defmodule Exdis.Database.String do
   ## INCRBYFLOAT Command
   ## ------------------------------------------------------------------
 
-  def increment_by_float(key, increment) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_increment_by_float(&1, increment))
+  def increment_by_float(database, key, increment) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_increment_by_float(&1, increment))
   end
 
   defp handle_increment_by_float(string() = state, increment) do
@@ -241,8 +241,8 @@ defmodule Exdis.Database.String do
   ## SET Command
   ## ------------------------------------------------------------------
 
-  def set(key, value) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_set(&1, value))
+  def set(database, key, value) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_set(&1, value))
   end
 
   defp handle_set(_state, bytes) do
@@ -255,8 +255,8 @@ defmodule Exdis.Database.String do
   ## STRLEN Command
   ## ------------------------------------------------------------------
 
-  def str_length(key) do
-    Exdis.Database.KeyOwner.manipulate(key, &handle_str_length/1)
+  def str_length(database, key) do
+    Exdis.Database.KeyOwner.manipulate(database, key, &handle_str_length/1)
   end
 
   defp handle_str_length(string(repr: repr, value: value)) do

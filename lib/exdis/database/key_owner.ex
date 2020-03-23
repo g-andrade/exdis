@@ -50,8 +50,8 @@ defmodule Exdis.Database.KeyOwner do
   ## High level API
   ## ------------------------------------------------------------------
 
-  def manipulate(key, manipulation_cb) do
-    {lock_ref, pid} = acquire_lock(key)
+  def manipulate(database, key, manipulation_cb) do
+    {lock_ref, pid} = acquire_lock(database, key)
     manipulation_result = manipulate_value(pid, lock_ref, manipulation_cb)
     :ok = release_lock(pid, lock_ref)
 
@@ -72,19 +72,19 @@ defmodule Exdis.Database.KeyOwner do
   ## Low Level API
   ## ------------------------------------------------------------------
 
-  def acquire_lock(key, retries_left \\ 2) do
-    case Exdis.Database.KeyRegistry.get_owner(key) do
+  def acquire_lock(database, key, retries_left \\ 2) do
+    case Exdis.Database.KeyRegistry.get_owner(database, key) do
       nil ->
         lock_ref_transfer_ref = make_ref()
-        case start_and_acquire_lock(key, self(), lock_ref_transfer_ref) do
+        case start_and_acquire_lock(database, key, self(), lock_ref_transfer_ref) do
           {:ok, pid} ->
             lock_ref = Process.monitor(pid)
             send(pid, {lock_ref_transfer_ref , lock_ref})
             {lock_ref, pid}
           {:error, {:already_registered, _}} when retries_left > 0 ->
-            acquire_lock(key, retries_left - 1)
+            acquire_lock(database, key, retries_left - 1)
           {:error, reason} ->
-            exit({reason, {__MODULE__, :acquire_lock, [key, retries_left]}})
+            exit({reason, {__MODULE__, :acquire_lock, [database, key, retries_left]}})
         end
 
       pid ->
@@ -96,9 +96,9 @@ defmodule Exdis.Database.KeyOwner do
           {:"DOWN", ^lock_ref, _, _, reason} ->
             case reason in [:noproc, :normal] and retries_left > 0 do
               true ->
-                acquire_lock(key, retries_left - 1)
+                acquire_lock(database, key, retries_left - 1)
               false ->
-                exit({reason, {__MODULE__, :acquire_lock, [key, retries_left]}})
+                exit({reason, {__MODULE__, :acquire_lock, [database, key, retries_left]}})
             end
         end
     end
@@ -120,10 +120,10 @@ defmodule Exdis.Database.KeyOwner do
   ## proc_lib Function Definitions
   ## ------------------------------------------------------------------
 
-  def proc_lib_init(key, lock_owner_pid, lock_ref_transfer_ref) do
+  def proc_lib_init(database, key, lock_owner_pid, lock_ref_transfer_ref) do
     _ = Process.flag(:trap_exit, true)
 
-    case Exdis.Database.KeyRegistry.register_owner(key) do
+    case Exdis.Database.KeyRegistry.register_owner(database, key) do
       {:ok, registry_pid} ->
         proc_lib_init_lock_ref(key, lock_owner_pid, lock_ref_transfer_ref, registry_pid)
       {:error, {:already_registered, _}} = error ->
@@ -158,16 +158,17 @@ defmodule Exdis.Database.KeyOwner do
   ## GenServer Function Definitions
   ## ------------------------------------------------------------------
 
+  @impl true
   def init(_) do
     exit(:not_supposed_to_run)
   end
 
-
+  @impl true
   def handle_call(call, from, state) do
     {:stop, {:unexpected_call, from, call}, state}
   end
 
-
+  @impl true
   def handle_cast({:acquire_lock, lock_ref, owner_pid}, state) do
     handle_acquire_lock_request(lock_ref, owner_pid, state)
   end
@@ -184,7 +185,7 @@ defmodule Exdis.Database.KeyOwner do
     {:stop, {:unexpected_cast, cast}, state}
   end
 
-
+  @impl true
   def handle_info({:"DOWN", ref, _, _, _} = info, state) do
     case identify_monitor_ref(ref, state) do
       :lock_owner ->
@@ -206,7 +207,7 @@ defmodule Exdis.Database.KeyOwner do
     {:stop, {:unexpected_info, info}, state}
   end
 
-
+  @impl true
   def terminate(reason, state) when reason !== :shutdown do
     state(key: key, registry_pid: registry_pid) = state
     :ok = Exdis.Database.KeyRegistry.unregister_owner(registry_pid, key)
@@ -219,8 +220,8 @@ defmodule Exdis.Database.KeyOwner do
   ## Private Function Definitions
   ## ------------------------------------------------------------------
 
-  defp start_and_acquire_lock(key, lock_owner_pid, lock_ref_transfer_ref) do
-    init_args = [key, lock_owner_pid, lock_ref_transfer_ref]
+  defp start_and_acquire_lock(database, key, lock_owner_pid, lock_ref_transfer_ref) do
+    init_args = [database, key, lock_owner_pid, lock_ref_transfer_ref]
     :proc_lib.start(__MODULE__, :proc_lib_init, init_args)
   end
 

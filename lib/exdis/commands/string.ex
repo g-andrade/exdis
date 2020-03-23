@@ -3,11 +3,11 @@ defmodule Exdis.Commands.String do
   ## APPEND Command
   ## ------------------------------------------------------------------
 
-  def append([{:string, key}, {:string, tail}]) do
-    Exdis.Database.String.append(key, tail)
+  def append(database, [{:string, key}, {:string, tail}]) do
+    Exdis.Database.String.append(database, key, tail)
   end
 
-  def append(_) do
+  def append(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -15,11 +15,11 @@ defmodule Exdis.Commands.String do
   ## DECR Command
   ## ------------------------------------------------------------------
 
-  def decrement([{:string, key}]) do
-    Exdis.Database.String.increment_by(key, -1)
+  def decrement(database, [{:string, key}]) do
+    Exdis.Database.String.increment_by(database, key, -1)
   end
 
-  def decrement(_) do
+  def decrement(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -27,16 +27,16 @@ defmodule Exdis.Commands.String do
   ## DECRBY Command
   ## ------------------------------------------------------------------
 
-  def decrement_by([{:string, key}, resp_decrement]) do
+  def decrement_by(database, [{:string, key}, resp_decrement]) do
     case maybe_coerce_resp_value_into_int64(resp_decrement) do
       {:ok, decrement} ->
-        Exdis.Database.String.increment_by(key, -decrement)
+        Exdis.Database.String.increment_by(database, key, -decrement)
       {:error, _} ->
         {:error, {:not_an_integer_or_out_of_range, "decrement"}}
     end
   end
 
-  def decrement_by(_) do
+  def decrement_by(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -44,11 +44,11 @@ defmodule Exdis.Commands.String do
   ## GET Command
   ## ------------------------------------------------------------------
 
-  def get([{:string, key}]) do
-    Exdis.Database.String.get(key)
+  def get(database, [{:string, key}]) do
+    Exdis.Database.String.get(database, key)
   end
 
-  def get(_) do
+  def get(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -56,16 +56,16 @@ defmodule Exdis.Commands.String do
   ## GETBIT Command
   ## ------------------------------------------------------------------
 
-  def get_bit([{:string, key}, resp_offset]) do
+  def get_bit(database, [{:string, key}, resp_offset]) do
     case maybe_coerce_resp_value_into_int64(resp_offset) do
       {:ok, offset} when offset >= 0 ->
-        Exdis.Database.String.get_bit(key, offset)
+        Exdis.Database.String.get_bit(database, key, offset)
       _ ->
         {:error, {:not_an_integer_or_out_of_range, "bit offset"}}
     end
   end
 
-  def get_bit(_) do
+  def get_bit(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -73,12 +73,12 @@ defmodule Exdis.Commands.String do
   ## GETRANGE Command
   ## ------------------------------------------------------------------
 
-  def get_range([{:string, key}, resp_start, resp_finish]) do
+  def get_range(database, [{:string, key}, resp_start, resp_finish]) do
     case {maybe_coerce_resp_value_into_int64(resp_start),
           maybe_coerce_resp_value_into_int64(resp_finish)}
     do
       {{:ok, start}, {:ok, finish}} ->
-        Exdis.Database.String.get_range(key, start, finish)
+        Exdis.Database.String.get_range(database, key, start, finish)
       {{:error, _}, _} ->
         {:error, {:not_an_integer_or_out_of_range, "start"}}
       {_, {:error, _}} ->
@@ -86,7 +86,7 @@ defmodule Exdis.Commands.String do
     end
   end
 
-  def get_range(_) do
+  def get_range(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -94,16 +94,16 @@ defmodule Exdis.Commands.String do
   ## GETSET Command
   ## ------------------------------------------------------------------
 
-  def get_set([{:string, key}, resp_value]) do
+  def get_set(database, [{:string, key}, resp_value]) do
     case maybe_coerce_resp_value_into_string(resp_value) do
       {:ok, value} ->
-        Exdis.Database.String.get_set(key, value)
+        Exdis.Database.String.get_set(database, key, value)
       {:error, _} ->
         {:error, :bad_syntax}
     end
   end
 
-  def get_set(_) do
+  def get_set(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -111,11 +111,11 @@ defmodule Exdis.Commands.String do
   ## INCR Command
   ## ------------------------------------------------------------------
 
-  def increment([{:string, key}]) do
-    Exdis.Database.String.increment_by(key, +1)
+  def increment(database, [{:string, key}]) do
+    Exdis.Database.String.increment_by(database, key, +1)
   end
 
-  def increment(_) do
+  def increment(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -123,16 +123,16 @@ defmodule Exdis.Commands.String do
   ## INCRBY Command
   ## ------------------------------------------------------------------
 
-  def increment_by([{:string, key}, resp_increment]) do
+  def increment_by(database, [{:string, key}, resp_increment]) do
     case maybe_coerce_resp_value_into_int64(resp_increment) do
       {:ok, increment} ->
-        Exdis.Database.String.increment_by(key, +increment)
+        Exdis.Database.String.increment_by(database, key, +increment)
       {:error, _} ->
         {:error, {:not_an_integer_or_out_of_range, "increment"}}
     end
   end
 
-  def increment_by(_) do
+  def increment_by(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -140,16 +140,16 @@ defmodule Exdis.Commands.String do
   ## INCRBYFLOAT Command
   ## ------------------------------------------------------------------
 
-  def increment_by_float([{:string, key}, resp_increment]) do
+  def increment_by_float(database, [{:string, key}, resp_increment]) do
     case maybe_coerce_resp_value_into_float(resp_increment) do
       {:ok, increment} ->
-        Exdis.Database.String.increment_by_float(key, +increment)
+        Exdis.Database.String.increment_by_float(database, key, +increment)
       {:error, _} ->
         {:error, {:not_a_valid_float, "increment"}}
     end
   end
 
-  def increment_by_float(_) do
+  def increment_by_float(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -157,16 +157,16 @@ defmodule Exdis.Commands.String do
   ## SET Command
   ## ------------------------------------------------------------------
 
-  def set([{:string, key}, resp_value]) do
+  def set(database, [{:string, key}, resp_value]) do
     case maybe_coerce_resp_value_into_string(resp_value) do
       {:ok, value} ->
-        Exdis.Database.String.set(key, value)
+        Exdis.Database.String.set(database, key, value)
       {:error, _} ->
         {:error, :bad_syntax}
     end
   end
 
-  def set(_) do
+  def set(_, _) do
     {:error, :bad_syntax}
   end
 
@@ -174,11 +174,11 @@ defmodule Exdis.Commands.String do
   ## STRLEN Command
   ## ------------------------------------------------------------------
 
-  def str_length([{:string, key}]) do
-    Exdis.Database.String.str_length(key)
+  def str_length(database, [{:string, key}]) do
+    Exdis.Database.String.str_length(database, key)
   end
 
-  def str_length(_) do
+  def str_length(_, _) do
     {:error, :bad_syntax}
   end
 
