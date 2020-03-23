@@ -51,8 +51,7 @@ defmodule Exdis.Connection do
     case transport.peername(socket) do
       {:ok, remote_peer} ->
         conn_id = build_connection_id(init_args, remote_peer)
-        in_buf = <<>>
-        loop(conn_id, transport, socket, in_buf)
+        loop(conn_id, transport, socket)
       {:error, _} ->
         exit(:normal)
     end
@@ -80,50 +79,62 @@ defmodule Exdis.Connection do
   ## Private Function Definitions - Loop
   ## ------------------------------------------------------------------
 
-  defp loop(conn_id, transport, socket, in_buf) do
-    command_parser = Exdis.Command.parser()
-    receive_command_data(conn_id, transport, socket, in_buf, command_parser)
+  defp loop(conn_id, transport, socket) do
+    receive_command_data(conn_id, transport, socket)
   end
 
-  defp receive_command_data(conn_id, transport, socket, in_buf, parser) do
+  defp receive_command_data(conn_id, transport, socket) do
+    {name, args} =
+      try do
+        Exdis.Command.recv(&receive_from_socket(transport, socket, &1))
+      catch
+        :socket_closed ->
+          exit(:normal)
+      end
+
+    handle_command(conn_id, transport, socket, name, args)
+  end
+
+  defp receive_from_socket(transport, socket, :line) do
+    _ = transport.setopts(socket, [packet: :line])
     case transport.recv(socket, 0, :infinity) do
       {:ok, data} ->
-        in_buf = <<in_buf :: bytes, data :: bytes>>
-        try_parsing_command(conn_id, transport, socket, in_buf, parser)
-      {:error, _} ->
-        exit(:normal)
+        _ = transport.setopts(socket, [packet: :raw])
+        data
+      {:error, :closed} ->
+        throw(:socket_closed)
     end
   end
 
-  defp try_parsing_command(conn_id, transport, socket, in_buf, parser) do
-    case parser.(in_buf) do
-      {:parsed, command, in_buf} ->
-        handle_command(conn_id, transport, socket, in_buf, command)
-      {:more, parser, in_buf} ->
-        receive_command_data(conn_id, transport, socket, in_buf, parser)
+  defp receive_from_socket(transport, socket, length) do
+    case transport.recv(socket, length, :infinity) do
+      {:ok, data} ->
+        data
+      {:error, :closed} ->
+        throw(:socket_closed)
     end
   end
 
-  defp handle_command(conn_id, transport, socket, in_buf, command) do
+  defp handle_command(conn_id, transport, socket, name, args) do
     database = Exdis.DatabaseRegistry.get_database() # TODO
-    case Exdis.Command.handle(database, command) do
+    case Exdis.Command.handle(database, name, args) do
       :ok ->
         send_whole_command_reply(transport, socket, :ok)
-        loop(conn_id, transport, socket, in_buf)
+        loop(conn_id, transport, socket)
 
       {:error, _} = error ->
         send_whole_command_reply(transport, socket, error)
-        loop(conn_id, transport, socket, in_buf)
+        loop(conn_id, transport, socket)
 
       {:async_ok, key_owner_pid, key_owner_mon, future_ref} ->
         handle_async_command_reply(
-          conn_id, transport, socket, in_buf,
+          conn_id, transport, socket,
           key_owner_pid, key_owner_mon, future_ref)
     end
   end
 
   defp handle_async_command_reply(
-    conn_id, transport, socket, in_buf,
+    conn_id, transport, socket,
     key_owner_pid, key_owner_mon, future_ref)
   do
     #
@@ -133,12 +144,12 @@ defmodule Exdis.Connection do
       {:more, chunk} ->
         send_partial_command_reply(transport, socket, chunk)
         handle_async_command_reply(
-          conn_id, transport, socket, in_buf,
+          conn_id, transport, socket,
           key_owner_pid, key_owner_mon, future_ref)
 
       {:finished, chunk} ->
         send_partial_command_reply(transport, socket, chunk)
-        loop(conn_id, transport, socket, in_buf)
+        loop(conn_id, transport, socket)
     end
   end
 

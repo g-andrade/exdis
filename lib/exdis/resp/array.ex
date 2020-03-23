@@ -1,14 +1,15 @@
 defmodule Exdis.RESP.Array do
-  use Bitwise
-  require Record
-
   ## ------------------------------------------------------------------
   ## Public Function Definitions
   ## ------------------------------------------------------------------
 
-  def parser() do
-    size_parser = Exdis.RESP.Integer.parser()
-    &parse_size(&1, size_parser)
+  def recv(fun) do
+    case Exdis.RESP.Integer.recv(fun) do
+      count when count >= 0 ->
+        recv_elements(count, fun, [])
+      0 ->
+        nil
+    end
   end
 
   def encode(list) when is_list(list) do
@@ -28,40 +29,14 @@ defmodule Exdis.RESP.Array do
   ## Private Function Definitions
   ## ------------------------------------------------------------------
 
-  defp parse_size(data, size_parser) do
-    case size_parser.(data) do
-      {:parsed, size, rest} when size >= 0 ->
-        acc = []
-        parse_elements(rest, size, acc)
-      {:parsed, -1, rest} ->
-        # special case
-        {:parsed, nil, rest}
-      {:parsed, _invalid_size, _rest} ->
-        raise "FIXME"
-      {:more, size_parser, rest} ->
-        {:more, &parse_size(&1, size_parser), rest}
-    end
-  end
-
-  defp parse_elements(data, elements_left, acc) do
+  defp recv_elements(count, fun, acc) do
     cond do
-      elements_left > 0 ->
-        element_parser = Exdis.RESP.Value.parser()
-        parse_element(data, elements_left, element_parser, acc)
-      elements_left === 0 ->
-        elements = Enum.reverse(acc)
-        {:parsed, elements, data}
-    end
-  end
-
-  defp parse_element(data, elements_left, element_parser, acc) do
-    case element_parser.(data) do
-      {:parsed, element, rest} ->
-        elements_left = elements_left - 1
-        acc = [element | acc]
-        parse_elements(rest, elements_left, acc)
-      {:more, element_parser, rest} ->
-        {:more, &parse_element(&1, elements_left, element_parser, acc), rest}
+      count > 0 ->
+        value = Exdis.RESP.Value.recv(fun)
+        acc = [value | acc]
+        recv_elements(count - 1, fun, acc)
+      count === 0 ->
+        Enum.reverse(acc)
     end
   end
 end

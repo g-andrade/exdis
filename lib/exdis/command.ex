@@ -3,19 +3,18 @@ defmodule Exdis.Command do
   ## Public Function Definitions
   ## ------------------------------------------------------------------
 
-  def parser() do
-    Exdis.RESP.Value.parser()
+  def recv(fun) do
+    case Exdis.RESP.Value.recv(fun) do
+      {:array, [{:string, name} | args]} ->
+        name = String.upcase(name)
+        {name, args}
+    end
   end
 
-  def handle(database, {:array, [{:string, name} | args]}) do
-    upcase_name = String.upcase(name)
+  def handle(database, name, args) do
     known_command_handlers = known_command_handlers()
-    handler = Map.get(known_command_handlers, upcase_name, &handle_unknown_command(&1, name, &2))
+    handler = Map.get(known_command_handlers, name, &handle_unknown_command(&1, name, &2))
     handler.(database, args)
-  end
-
-  def handle(_database, _resp_value) do
-    {:error, :bad_syntax}
   end
 
   ## ------------------------------------------------------------------

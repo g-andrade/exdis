@@ -32,15 +32,15 @@ defmodule Exdis.Int64 do
     byte_size( to_decimal_string(integer) )
   end
 
-  def from_decimal_string(string) do
+  def from_decimal_string(string, expected_trailing_data \\ "") do
     case (
-      byte_size(string) < @max_decimal_string_length
+      byte_size(string) < (@max_decimal_string_length + byte_size(expected_trailing_data))
       and Integer.parse(string))
     do
-      {integer, ""} when integer >= @min and integer <= @max ->
+      {integer, ^expected_trailing_data} when integer >= @min and integer <= @max ->
         {:ok, integer}
-      {_integer, <<trailing_data :: bytes>>} ->
-        {:error, {:trailing_data, trailing_data}}
+      {_integer, <<unexpected_trailing_data :: bytes>>} ->
+        {:error, {:unexpected_trailing_data, unexpected_trailing_data}}
       :error ->
         {:error, {:not_an_integer, string}}
       false ->
