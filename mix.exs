@@ -23,8 +23,7 @@ defmodule Exdis.MixProject do
   defp deps do
     [
       {:ranch, "1.7.1"},
-      {:recon, "2.5.0"},
-      {:sbroker, "1.0.0"}
+      {:recon, "2.5.0"}
       # {:dep_from_hexpm, "~> 0.3.0"},
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"},
     ]
