@@ -20,13 +20,13 @@ defmodule ExdisTest.Unit.Type.String do
     assert ""  = r(ctx, [GET, :x])
   end
 
-#  test "Very big payload in GET/SET", ctx do
-#    payload  = String.duplicate("abcd", 1000000)
-#    assert :ok     = r(ctx, [SET, :foo, payload])
-#    assert payload = r(ctx, [GET, :foo])
-#  end
+  test "Very big payload in GET/SET", ctx do
+    payload  = String.duplicate("abcd", 1000000)
+    assert :ok     = r(ctx, [SET, :foo, payload])
+    assert payload = r(ctx, [GET, :foo])
+  end
 
-#  XXX tag as slow?
+#  # XXX tag as slow?
 #  test "Very big payload random access", ctx do
 #    number_of_payloads = 100
 #    payloads = Enum.reduce(1..number_of_payloads, %{},
