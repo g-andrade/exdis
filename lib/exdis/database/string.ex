@@ -6,9 +6,6 @@ defmodule Exdis.Database.String do
   ## Constants
   ## ------------------------------------------------------------------
 
-  @min_integer_value (-(1 <<< 63))
-  @max_integer_value ((1 <<< 63) - 1)
-
   @max_iodata_fragments_upon_read 100
 
   ## ------------------------------------------------------------------
@@ -20,31 +17,12 @@ defmodule Exdis.Database.String do
     value: nil
   )
 
-  @opaque state :: iodata_state | integer_state | float_state
+  @opaque state :: iodata_state | int64_state | float_state
   @typep iodata_state :: state(:iodata, Exdis.IoData.t)
-  @typep integer_state :: state(:integer, integer)
-  @typep float_state :: state(:float, float)
+  @typep int64_state :: state(:int64, Exdis.Int64.t)
+  @typep float_state :: state(:float, Exdis.Float.t)
 
   @typep state(repr, value) :: record(:string, repr: repr, value: value)
-
-  ## ------------------------------------------------------------------
-  ## Utilities
-  ## ------------------------------------------------------------------
-
-  def min_integer_value(), do: @min_integer_value
-  def max_integer_value(), do: @max_integer_value
-
-  def max_integer_value_str_length() do
-    # TODO evaluate this at compile time using `ct_transform` equivalent?
-    str_min = Integer.to_string(min_integer_value())
-    str_max = Integer.to_string(max_integer_value())
-    max(byte_size(str_min), byte_size(str_max) + 1) # +1 for an optional plus sign
-  end
-
-  def max_float_value_str_length() do
-    # the DBL_MAX_10_EXP constant in `float.h`
-    308
-  end
 
   ## ------------------------------------------------------------------
   ## APPEND Command
@@ -91,13 +69,13 @@ defmodule Exdis.Database.String do
         reply = {:string, value_string}
         {:ok_and_update, reply, state}
 
-      string(repr: :integer, value: value) ->
-        value_string = Integer.to_string(value)
+      string(repr: :int64, value: value) ->
+        value_string = Exdis.Int64.to_decimal_string(value)
         reply = {:string, value_string}
         {:ok, reply}
 
       string(repr: :float, value: value) ->
-        value_string = float_to_output_string(value)
+        value_string = Exdis.Float.to_decimal_string(value)
         reply = {:string, value_string}
         {:ok, reply}
     end
@@ -200,13 +178,13 @@ defmodule Exdis.Database.String do
 
   defp handle_increment_by(string() = state, increment) do
     case maybe_coerce_into_integer(state) do
-      string(repr: :integer, value: value) = state ->
-        case value + increment do
-          value when value >= @min_integer_value and value <= @max_integer_value ->
+      string(repr: :int64, value: value) = state ->
+        case Exdis.Int64.add(value, increment) do
+          {:ok, value} ->
             reply = {:integer, value}
             state = string(state, value: value)
             {:ok_and_update, reply, state}
-          _underflow_or_overflow ->
+          {:error, :overflow_or_underflow} ->
             {:error_and_update, :increment_or_decrement_would_overflow, state}
         end
       state ->
@@ -216,7 +194,7 @@ defmodule Exdis.Database.String do
 
   defp handle_increment_by(nil, increment) do
     reply = {:integer, increment}
-    state = string(repr: :integer, value: increment)
+    state = string(repr: :int64, value: increment)
     {:ok_and_update, reply, state}
   end
 
@@ -235,13 +213,12 @@ defmodule Exdis.Database.String do
   defp handle_increment_by_float(string() = state, increment) do
     case maybe_coerce_into_float(state) do
       string(repr: :float, value: value) = state ->
-        try do
-          value = value + increment
-          reply = {:string, float_to_output_string(value)}
-          state = string(state, value: value)
-          {:ok_and_update, reply, state}
-        rescue
-          _ in ArithmeticError ->
+        case Exdis.Float.add(value, increment) do
+          {:ok, value} ->
+            reply = {:string, Exdis.Float.to_decimal_string(value)}
+            state = string(state, value: value)
+            {:ok_and_update, reply, state}
+          {:error, :NaN_or_infinity} ->
             {:error_and_update, :increment_would_produce_NaN_or_infinity, state}
         end
       state ->
@@ -250,8 +227,9 @@ defmodule Exdis.Database.String do
   end
 
   defp handle_increment_by_float(nil, increment) do
-    reply = {:string, float_to_output_string(increment)}
-    state = string(repr: :float, value: increment)
+    value = Exdis.Float.new(increment)
+    reply = {:string, Exdis.Float.to_decimal_string(value)}
+    state = string(repr: :float, value: value)
     {:ok_and_update, reply, state}
   end
 
@@ -287,14 +265,12 @@ defmodule Exdis.Database.String do
         value_string_length = Exdis.IoData.size(value)
         reply = {:integer, value_string_length}
         {:ok, reply}
-      :integer ->
-        value_string = Integer.to_string(value)
-        value_string_length = byte_size(value_string)
+      :int64 ->
+        value_string_length = Exdis.Int64.decimal_string_length(value)
         reply = {:integer, value_string_length}
         {:ok, reply}
       :float ->
-        value_string = float_to_output_string(value)
-        value_string_length = byte_size(value_string)
+        value_string_length = Exdis.Float.decimal_string_length(value)
         reply = {:integer, value_string_length}
         {:ok, reply}
     end
@@ -313,19 +289,19 @@ defmodule Exdis.Database.String do
   ## Type Coercion - To Integer
   ## ------------------------------------------------------------------
 
-  defp maybe_coerce_into_integer(string(repr: :integer) = state) do
+  defp maybe_coerce_into_integer(string(repr: :int64) = state) do
     state
   end
 
   defp maybe_coerce_into_integer(string(repr: :iodata, value: value) = state) do
-    case Exdis.IoData.size(value) <= max_integer_value_str_length() do
+    case Exdis.IoData.size(value) <= Exdis.Int64.max_decimal_string_length() do
       true ->
         value = Exdis.IoData.flatten(value)
         bytes = Exdis.IoData.bytes(value)
-        case Integer.parse(bytes) do
-          {integer, ""} when integer >= @min_integer_value and integer <= @max_integer_value ->
-            string(state, repr: :integer, value: integer)
-          _ ->
+        case Exdis.Int64.from_decimal_string(bytes) do
+          {:ok, integer} ->
+            string(state, repr: :int64, value: integer)
+          {:error, _} ->
             string(state, value: value)
         end
       false ->
@@ -334,10 +310,10 @@ defmodule Exdis.Database.String do
   end
 
   defp maybe_coerce_into_integer(string(repr: :float, value: value) = state) do
-    case round(value) do
-      integer when integer == value ->
-        string(state, repr: :integer, value: integer)
-      _ ->
+    case Exdis.Int64.from_float(value) do
+      {:ok, integer} ->
+        string(state, repr: :int64, value: integer)
+      {:error, _} ->
         state
     end
   end
@@ -350,39 +326,28 @@ defmodule Exdis.Database.String do
     state
   end
 
-  defp maybe_coerce_into_float(string(repr: :integer, value: value) = state) do
-    case 0.0 + value do
-      float when float == value ->
-        string(state, repr: :float, value: value)
-      _ ->
-        # loss of precision
+  defp maybe_coerce_into_float(string(repr: :int64, value: value) = state) do
+    case Exdis.Float.from_integer(value) do
+      {:ok, float} ->
+        string(state, repr: :float, value: float)
+      {:error, _} ->
         state
     end
   end
 
   defp maybe_coerce_into_float(string(repr: :iodata, value: value) = state) do
-    case Exdis.IoData.size(value) <= max_float_value_str_length() do
+    case Exdis.IoData.size(value) <= Exdis.Float.max_decimal_string_length() do
       true ->
         value = Exdis.IoData.flatten(value)
         bytes = Exdis.IoData.bytes(value)
-        case Float.parse(bytes) do
-          {float, ""} ->
+        case Exdis.Float.from_decimal_string(bytes) do
+          {:ok, float} ->
             string(state, repr: :float, value: float)
-          _ ->
+          {:error, _} ->
             string(state, value: value)
         end
       false ->
         state
-    end
-  end
-
-
-  defp float_to_output_string(float) do
-    case round(float) do
-      integer when integer == float ->
-        Integer.to_string(integer)
-      _ ->
-        inspect float
     end
   end
 
@@ -412,14 +377,14 @@ defmodule Exdis.Database.String do
     state
   end
 
-  defp coerce_into_iodata(string(repr: :integer, value: value) = state) do
-    bytes = Integer.to_string(value)
+  defp coerce_into_iodata(string(repr: :int64, value: value) = state) do
+    bytes = Exdis.Int64.to_decimal_string(value)
     new_value = Exdis.IoData.new(bytes)
     string(state, repr: :iodata, value: new_value)
   end
 
   defp coerce_into_iodata(string(repr: :float, value: value) = state) do
-    bytes = float_to_output_string(value)
+    bytes = Exdis.Float.to_decimal_string(value)
     new_value = Exdis.IoData.new(bytes)
     string(state, repr: :iodata, value: new_value)
   end

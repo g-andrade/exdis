@@ -7,9 +7,9 @@ defmodule Exdis.RESP.Integer do
   ## ------------------------------------------------------------------
 
   def parser() do
-    min_value = Exdis.Database.String.min_integer_value()
-    max_value = Exdis.Database.String.max_integer_value()
-    max_length = Exdis.Database.String.max_integer_value_str_length()
+    min_value = Exdis.Int64.min()
+    max_value = Exdis.Int64.max()
+    max_length = Exdis.Int64.max_decimal_string_length()
     line_parser_opts = [max_length: max_length]
     line_parser = Exdis.RESP.Line.parser(line_parser_opts)
     &parse(&1, min_value, max_value, line_parser)

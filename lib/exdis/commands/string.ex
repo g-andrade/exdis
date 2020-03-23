@@ -28,10 +28,10 @@ defmodule Exdis.Commands.String do
   ## ------------------------------------------------------------------
 
   def decrement_by([{:string, key}, resp_decrement]) do
-    case maybe_coerce_resp_value_into_integer(resp_decrement) do
-      decrement when is_integer(decrement) ->
+    case maybe_coerce_resp_value_into_int64(resp_decrement) do
+      {:ok, decrement} ->
         Exdis.Database.String.increment_by(key, -decrement)
-      :no ->
+      {:error, _} ->
         {:error, {:not_an_integer_or_out_of_range, "decrement"}}
     end
   end
@@ -57,8 +57,8 @@ defmodule Exdis.Commands.String do
   ## ------------------------------------------------------------------
 
   def get_bit([{:string, key}, resp_offset]) do
-    case maybe_coerce_resp_value_into_integer(resp_offset) do
-      offset when is_integer(offset) and offset >= 0 ->
+    case maybe_coerce_resp_value_into_int64(resp_offset) do
+      {:ok, offset} when offset >= 0 ->
         Exdis.Database.String.get_bit(key, offset)
       _ ->
         {:error, {:not_an_integer_or_out_of_range, "bit offset"}}
@@ -74,14 +74,14 @@ defmodule Exdis.Commands.String do
   ## ------------------------------------------------------------------
 
   def get_range([{:string, key}, resp_start, resp_finish]) do
-    case {maybe_coerce_resp_value_into_integer(resp_start),
-          maybe_coerce_resp_value_into_integer(resp_finish)}
+    case {maybe_coerce_resp_value_into_int64(resp_start),
+          maybe_coerce_resp_value_into_int64(resp_finish)}
     do
-      {start, finish} when is_integer(start) and is_integer(finish) ->
+      {{:ok, start}, {:ok, finish}} ->
         Exdis.Database.String.get_range(key, start, finish)
-      {nil, _} ->
+      {{:error, _}, _} ->
         {:error, {:not_an_integer_or_out_of_range, "start"}}
-      {_, nil} ->
+      {_, {:error, _}} ->
         {:error, {:not_an_integer_or_out_of_range, "end"}}
     end
   end
@@ -96,9 +96,9 @@ defmodule Exdis.Commands.String do
 
   def get_set([{:string, key}, resp_value]) do
     case maybe_coerce_resp_value_into_string(resp_value) do
-      <<value :: bytes>> ->
+      {:ok, value} ->
         Exdis.Database.String.get_set(key, value)
-      :no ->
+      {:error, _} ->
         {:error, :bad_syntax}
     end
   end
@@ -124,10 +124,10 @@ defmodule Exdis.Commands.String do
   ## ------------------------------------------------------------------
 
   def increment_by([{:string, key}, resp_increment]) do
-    case maybe_coerce_resp_value_into_integer(resp_increment) do
-      increment when is_integer(increment) ->
+    case maybe_coerce_resp_value_into_int64(resp_increment) do
+      {:ok, increment} ->
         Exdis.Database.String.increment_by(key, +increment)
-      :no ->
+      {:error, _} ->
         {:error, {:not_an_integer_or_out_of_range, "increment"}}
     end
   end
@@ -142,9 +142,9 @@ defmodule Exdis.Commands.String do
 
   def increment_by_float([{:string, key}, resp_increment]) do
     case maybe_coerce_resp_value_into_float(resp_increment) do
-      increment when is_float(increment) ->
+      {:ok, increment} ->
         Exdis.Database.String.increment_by_float(key, +increment)
-      :no ->
+      {:error, _} ->
         {:error, {:not_a_valid_float, "increment"}}
     end
   end
@@ -159,9 +159,9 @@ defmodule Exdis.Commands.String do
 
   def set([{:string, key}, resp_value]) do
     case maybe_coerce_resp_value_into_string(resp_value) do
-      <<value :: bytes>> ->
+      {:ok, value} ->
         Exdis.Database.String.set(key, value)
-      :no ->
+      {:error, _} ->
         {:error, :bad_syntax}
     end
   end
@@ -187,41 +187,31 @@ defmodule Exdis.Commands.String do
   ## ------------------------------------------------------------------
 
   defp maybe_coerce_resp_value_into_string({:string, string}) do
-    string
+    {:ok, string}
   end
 
   defp maybe_coerce_resp_value_into_string({:integer, integer}) do
-    Integer.to_string(integer)
+    {:ok, Exdis.Int64.to_decimal_string(integer)}
   end
 
   defp maybe_coerce_resp_value_into_string(_) do
-    :no
+    {:error, :unsupported_conversion}
   end
 
   ## ------------------------------------------------------------------
   ## RESP Type Coercion - To Integer
   ## ------------------------------------------------------------------
 
-  defp maybe_coerce_resp_value_into_integer({:integer, integer}) do
-    integer
+  defp maybe_coerce_resp_value_into_int64({:integer, integer}) do
+    {:ok, Exdis.Int64.new(integer)}
   end
 
-  defp maybe_coerce_resp_value_into_integer({:string, string}) do
-    min_value = Exdis.Database.String.min_integer_value()
-    max_value = Exdis.Database.String.max_integer_value()
-    case (
-      byte_size(string) <= Exdis.Database.String.max_integer_value_str_length()
-      and Integer.parse(string))
-    do
-      {integer, ""} when integer >= min_value and integer <= max_value ->
-        integer
-      _ ->
-        :no
-    end
+  defp maybe_coerce_resp_value_into_int64({:string, string}) do
+    Exdis.Int64.from_decimal_string(string)
   end
 
-  defp maybe_coerce_resp_value_into_integer(_) do
-    :no
+  defp maybe_coerce_resp_value_into_int64(_) do
+    {:error, :unsupported_conversion}
   end
 
   ## ------------------------------------------------------------------
@@ -229,22 +219,14 @@ defmodule Exdis.Commands.String do
   ## ------------------------------------------------------------------
 
   defp maybe_coerce_resp_value_into_float({:string, string}) do
-    case (
-      byte_size(string) <= Exdis.Database.String.max_float_value_str_length()
-      and Float.parse(string))
-    do
-      {float, ""} ->
-        float
-      _ ->
-        :no
-    end
+    Exdis.Float.from_decimal_string(string)
   end
 
   defp maybe_coerce_resp_value_into_float({:integer, integer}) do
-    1.0 * integer
+    Exdis.Float.from_integer(integer)
   end
 
   defp maybe_coerce_resp_value_into_float(_) do
-    :no
+    {:error, :unsupported_conversion}
   end
 end
