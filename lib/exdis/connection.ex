@@ -14,6 +14,14 @@ defmodule Exdis.Connection do
   ## Type and Record Definitions
   ## ------------------------------------------------------------------
 
+  Record.defrecord(:state,
+    id: nil,
+    writer_pid: nil,
+    transport: nil,
+    socket: nil,
+    command_handler: nil
+  )
+
   ## ------------------------------------------------------------------
   ## :ranch_protocol Function Definitions
   ## ------------------------------------------------------------------
@@ -51,7 +59,15 @@ defmodule Exdis.Connection do
     case transport.peername(socket) do
       {:ok, remote_peer} ->
         conn_id = build_connection_id(init_args, remote_peer)
-        loop(conn_id, transport, socket)
+        {:ok, writer_pid} = Exdis.ConnectionWriter.start_link(conn_id, transport, socket)
+        command_handler = Exdis.CommandHandler.new(writer_pid)
+        state = state(
+          id: conn_id,
+          writer_pid: writer_pid,
+          transport: transport,
+          socket: socket,
+          command_handler: command_handler)
+        loop(state)
       {:error, _} ->
         exit(:normal)
     end
@@ -79,20 +95,20 @@ defmodule Exdis.Connection do
   ## Private Function Definitions - Loop
   ## ------------------------------------------------------------------
 
-  defp loop(conn_id, transport, socket) do
-    receive_command_data(conn_id, transport, socket)
+  defp loop(state) do
+    state = receive_and_handle_command(state)
+    loop(state)
   end
 
-  defp receive_command_data(conn_id, transport, socket) do
-    {name, args} =
-      try do
-        Exdis.Command.recv(&receive_from_socket(transport, socket, &1))
-      catch
-        :socket_closed ->
-          exit(:normal)
-      end
-
-    handle_command(conn_id, transport, socket, name, args)
+  defp receive_and_handle_command(state) do
+    state(transport: transport, socket: socket, command_handler: command_handler) = state
+    try do
+      command_handler = Exdis.CommandHandler.receive_and_handle(command_handler, &receive_from_socket(transport, socket, &1))
+      state(state, command_handler: command_handler)
+    catch
+      :socket_closed ->
+        exit(:normal)
+    end
   end
 
   defp receive_from_socket(transport, socket, :line) do
@@ -112,64 +128,6 @@ defmodule Exdis.Connection do
         data
       {:error, :closed} ->
         throw(:socket_closed)
-    end
-  end
-
-  defp handle_command(conn_id, transport, socket, name, args) do
-    database = Exdis.DatabaseRegistry.get_database() # TODO
-    case Exdis.Command.handle(database, name, args) do
-      :ok ->
-        send_whole_command_reply(transport, socket, :ok)
-        loop(conn_id, transport, socket)
-
-      {:error, _} = error ->
-        send_whole_command_reply(transport, socket, error)
-        loop(conn_id, transport, socket)
-
-      {:async_ok, key_owner_pid, key_owner_mon, future_ref} ->
-        handle_async_command_reply(
-          conn_id, transport, socket,
-          key_owner_pid, key_owner_mon, future_ref)
-    end
-  end
-
-  defp handle_async_command_reply(
-    conn_id, transport, socket,
-    key_owner_pid, key_owner_mon, future_ref)
-  do
-    #
-    # FIXME redo this mess of a loop
-    #
-    case Exdis.Database.KeyOwner.consume_future(key_owner_pid, key_owner_mon, future_ref) do
-      {:more, chunk} ->
-        send_partial_command_reply(transport, socket, chunk)
-        handle_async_command_reply(
-          conn_id, transport, socket,
-          key_owner_pid, key_owner_mon, future_ref)
-
-      {:finished, chunk} ->
-        send_partial_command_reply(transport, socket, chunk)
-        loop(conn_id, transport, socket)
-    end
-  end
-
-  defp send_whole_command_reply(transport, socket, reply) do
-    data = Exdis.CommandReply.encode(reply)
-    write_to_socket(transport, socket, data)
-  end
-
-  defp send_partial_command_reply(transport, socket, chunk) do
-    # TODO
-    send_whole_command_reply(transport, socket, chunk)
-  end
-
-  defp write_to_socket(transport, socket, data) do
-    case transport.send(socket, data) do
-      :ok ->
-        :ok
-      {:error, reason} ->
-        Logger.warn("Failed to write to socket: #{inspect reason}")
-        exit(:normal)
     end
   end
 end

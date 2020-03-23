@@ -1,51 +1,65 @@
 defmodule Exdis.Command do
+  require Logger
+
   ## ------------------------------------------------------------------
   ## Public Function Definitions
   ## ------------------------------------------------------------------
 
-  def recv(fun) do
-    case Exdis.RESP.Value.recv(fun) do
+  def recv(recv_fun) do
+    #Logger.info("Receiving command")
+    case Exdis.RESP.Value.recv(recv_fun) do
       {:array, [{:string, name} | args]} ->
+        #Logger.info("Command received: #{inspect {name, args}}")
         name = String.upcase(name)
-        {name, args}
+        parse(name, args)
     end
   end
-
-  def handle(database, name, args) do
-    known_command_handlers = known_command_handlers()
-    handler = Map.get(known_command_handlers, name, &handle_unknown_command(&1, name, &2))
-    handler.(database, args)
-  end
-
+    
   ## ------------------------------------------------------------------
   ## Private Function Definitions
   ## ------------------------------------------------------------------
 
-  defp known_command_handlers() do
+  defp parse(name, args) do
+    parsers = known_parsers()
+    parser = Map.get(parsers, name, &parse_unknown_command(name, &1))
+    case parser.(args) do
+      {:error, reason} ->
+        {:error, {:parse, reason}}
+      result ->
+        result
+    end
+  end
+
+  defp known_parsers() do
     %{
       # Keys
-      "KEYS" => &Exdis.Commands.Keys.keys/2,
+      "KEYS" => &Exdis.CommandParsers.Key.keys/1,
 
       # Server
-      "FLUSHDB" => &Exdis.Commands.Server.flush_db/2,
+      "FLUSHDB" => &Exdis.CommandParsers.Server.flush_db/1,
 
-      # String commands
-      "APPEND" => &Exdis.Commands.String.append/2,
-      "DECR" => &Exdis.Commands.String.decrement/2,
-      "DECRBY" => &Exdis.Commands.String.decrement_by/2,
-      "GET" => &Exdis.Commands.String.get/2,
-      "GETBIT" => &Exdis.Commands.String.get_bit/2,
-      "GETRANGE" => &Exdis.Commands.String.get_range/2,
-      "GETSET" => &Exdis.Commands.String.get_set/2,
-      "INCR" => &Exdis.Commands.String.increment/2,
-      "INCRBY" => &Exdis.Commands.String.increment_by/2,
-      "INCRBYFLOAT" => &Exdis.Commands.String.increment_by_float/2,
-      "SET" => &Exdis.Commands.String.set/2,
-      "STRLEN" => &Exdis.Commands.String.str_length/2
+      # Strings
+      "APPEND" => &Exdis.CommandParsers.String.append/1,
+      "DECR" => &Exdis.CommandParsers.String.decrement/1,
+      "DECRBY" => &Exdis.CommandParsers.String.decrement_by/1,
+      "GET" => &Exdis.CommandParsers.String.get/1,
+      "GETBIT" => &Exdis.CommandParsers.String.get_bit/1,
+      "GETRANGE" => &Exdis.CommandParsers.String.get_range/1,
+      "GETSET" => &Exdis.CommandParsers.String.get_set/1,
+      "INCR" => &Exdis.CommandParsers.String.increment/1,
+      "INCRBY" => &Exdis.CommandParsers.String.increment_by/1,
+      "INCRBYFLOAT" => &Exdis.CommandParsers.String.increment_by_float/1,
+      "SET" => &Exdis.CommandParsers.String.set/1,
+      "STRLEN" => &Exdis.CommandParsers.String.str_length/1,
+
+      # Transactions
+      "DISCARD" => &Exdis.CommandParsers.Transaction.discard/1,
+      "EXEC" => &Exdis.CommandParsers.Transaction.exec/1,
+      "MULTI" => &Exdis.CommandParsers.Transaction.multi/1
     }
   end
 
-  defp handle_unknown_command(_database, name, _args) do
+  defp parse_unknown_command(name, _args) do
     {:error, {:unknown_command, name}}
   end
 end

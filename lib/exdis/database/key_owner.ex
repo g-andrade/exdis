@@ -1,5 +1,6 @@
 defmodule Exdis.Database.KeyOwner do
   use GenServer
+  require Logger
   require Record
 
   ## ------------------------------------------------------------------
@@ -25,20 +26,23 @@ defmodule Exdis.Database.KeyOwner do
     ref: nil,
     owner_pid: nil,
     owner_mon: nil,
-    uncommitted_value_state: nil
+    uncommitted_value_state: nil,
+    futures_owner: nil
   )
 
   Record.defrecord(:pending_locks,
     all: nil,
     owner_mons: nil,
     queue: nil,
-    queue_index_counter: 0
+    queue_index_counter: 0,
+    futures_owner: nil
   )
 
   Record.defrecord(:pending_lock,
     owner_pid: nil,
     owner_mon: nil,
-    queue_index: nil
+    queue_index: nil,
+    futures_owner: nil
   )
 
   Record.defrecord(:future,
@@ -50,50 +54,50 @@ defmodule Exdis.Database.KeyOwner do
   ## High level API
   ## ------------------------------------------------------------------
 
-  def manipulate(database, key, manipulation_cb) do
-    {lock_ref, pid} = acquire_lock(database, key)
-    manipulation_result = manipulate_value(pid, lock_ref, manipulation_cb)
-    :ok = release_lock(pid, lock_ref)
+  #def manipulate(database, key, manipulation_cb) do
+  #  {lock_ref, pid} = acquire_lock(database, key)
+  #  manipulation_result = manipulate_value(pid, lock_ref, manipulation_cb)
+  #  :ok = release_lock(pid, lock_ref)
 
-    case manipulation_result do
-      :ok ->
-        Process.demonitor(lock_ref, [:flush])
-        :ok
-      {:ok, future_ref} ->
-        mon = lock_ref
-        {:async_ok, pid, mon, future_ref}
-      {:error, _} = error ->
-        Process.demonitor(lock_ref, [:flush])
-        error
-    end
-  end
+  #  case manipulation_result do
+  #    :ok ->
+  #      Process.demonitor(lock_ref, [:flush])
+  #      :ok
+  #    {:ok, future_ref} ->
+  #      mon = lock_ref
+  #      {:async_ok, pid, mon, future_ref}
+  #    {:error, _} = error ->
+  #      Process.demonitor(lock_ref, [:flush])
+  #      error
+  #  end
+  #end
 
-  def manipulate_if_set(database, key, manipulation_cb, result_otherwise) do
-    try do
-      manipulate(database, key, manipulation_cb)
-    catch
-      :error, %KeyError{term: ^database, key: ^key} ->
-        result_otherwise
-    end
-  end
+  #def manipulate_if_set(database, key, manipulation_cb, result_otherwise) do
+  #  try do
+  #    manipulate(database, key, manipulation_cb)
+  #  catch
+  #    :error, %KeyError{term: ^database, key: ^key} ->
+  #      result_otherwise
+  #  end
+  #end
 
   ## ------------------------------------------------------------------
   ## Low Level API
   ## ------------------------------------------------------------------
 
-  def acquire_lock(database, key, start_if_unset \\ true, retries_left \\ 2) do
+  def acquire_lock(database, key, futures_owner, start_if_unset \\ true, retries_left \\ 2) do
     case Exdis.Database.KeyRegistry.get_owner(database, key) do
       nil when start_if_unset ->
         lock_ref_transfer_ref = make_ref()
-        case start_and_acquire_lock(database, key, self(), lock_ref_transfer_ref) do
+        case start_and_acquire_lock(database, key, self(), lock_ref_transfer_ref, futures_owner) do
           {:ok, pid} ->
             lock_ref = Process.monitor(pid)
             send(pid, {lock_ref_transfer_ref , lock_ref})
-            {lock_ref, pid}
+            {pid, lock_ref}
           {:error, {:already_registered, _}} when retries_left > 0 ->
-            acquire_lock(database, key, start_if_unset, retries_left - 1)
+            acquire_lock(database, key, futures_owner, start_if_unset, retries_left - 1)
           {:error, reason} ->
-            args = [database, key, start_if_unset, retries_left]
+            args = [database, key, futures_owner, start_if_unset, retries_left]
             exit({reason, {__MODULE__, :acquire_lock, args}})
         end
 
@@ -102,16 +106,16 @@ defmodule Exdis.Database.KeyOwner do
 
       pid ->
         lock_ref = Process.monitor(pid)
-        GenServer.cast(pid, {:acquire_lock, lock_ref, self()})
+        GenServer.cast(pid, {:acquire_lock, lock_ref, self(), futures_owner})
         receive do
           {^lock_ref, :ok} ->
-            {lock_ref, pid}
+            {pid, lock_ref}
           {:"DOWN", ^lock_ref, _, _, reason} ->
             case reason in [:noproc, :normal] and retries_left > 0 do
               true ->
-                acquire_lock(database, key, start_if_unset, retries_left - 1)
+                acquire_lock(database, key, futures_owner, start_if_unset, retries_left - 1)
               false ->
-                args = [database, key, start_if_unset, retries_left]
+                args = [database, key, futures_owner, start_if_unset, retries_left]
                 exit({reason, {__MODULE__, :acquire_lock, args}})
             end
         end
@@ -130,28 +134,37 @@ defmodule Exdis.Database.KeyOwner do
     make_call_as_future_owner(pid, mon, future_ref, &perform_future_consumption/3)
   end
 
+  def discard_future(pid, mon, future_ref) do
+    make_call_as_future_updater(pid, mon, future_ref, &perform_future_rejection/3)
+  end
+
   ## ------------------------------------------------------------------
   ## proc_lib Function Definitions
   ## ------------------------------------------------------------------
 
-  def proc_lib_init(database, key, lock_owner_pid, lock_ref_transfer_ref) do
+  def proc_lib_init(database, key, lock_owner_pid, lock_ref_transfer_ref, futures_owner) do
     _ = Process.flag(:trap_exit, true)
 
     case Exdis.Database.KeyRegistry.register_owner(database, key) do
       {:ok, registry_pid} ->
-        proc_lib_init_lock_ref(key, lock_owner_pid, lock_ref_transfer_ref, registry_pid)
+        proc_lib_init_lock_ref(key, lock_owner_pid, lock_ref_transfer_ref, registry_pid, futures_owner)
       {:error, {:already_registered, _}} = error ->
         :proc_lib.init_ack(error)
     end
   end
 
-  defp proc_lib_init_lock_ref(key, lock_owner_pid, lock_ref_transfer_ref, registry_pid) do
+  defp proc_lib_init_lock_ref(key, lock_owner_pid, lock_ref_transfer_ref, registry_pid, futures_owner) do
     lock_owner_mon = Process.monitor(lock_owner_pid)
     :proc_lib.init_ack({:ok, self()})
 
     receive do
       {^lock_ref_transfer_ref, lock_ref} ->
-        lock = lock(ref: lock_ref, owner_pid: lock_owner_pid, owner_mon: lock_owner_mon)
+        lock = lock(
+          ref: lock_ref,
+          owner_pid: lock_owner_pid,
+          owner_mon: lock_owner_mon,
+          futures_owner: futures_owner)
+
         pending_locks = pending_locks(all: %{}, owner_mons: %{}, queue: :gb_trees.empty())
         state = state(
           key: key,
@@ -183,8 +196,8 @@ defmodule Exdis.Database.KeyOwner do
   end
 
   @impl true
-  def handle_cast({:acquire_lock, lock_ref, owner_pid}, state) do
-    handle_acquire_lock_request(lock_ref, owner_pid, state)
+  def handle_cast({:acquire_lock, lock_ref, owner_pid, futures_owner}, state) do
+    handle_acquire_lock_request(lock_ref, owner_pid, futures_owner, state)
   end
 
   def handle_cast({:lock_owner_call, lock_ref, callback}, state) do
@@ -193,6 +206,10 @@ defmodule Exdis.Database.KeyOwner do
 
   def handle_cast({:future_owner_call, future_ref, callback}, state) do
     handle_future_owner_call(future_ref, callback, state)
+  end
+
+  def handle_cast({:future_updater_call, future_ref, caller_pid, callback}, state) do
+    handle_future_manipulation_call(future_ref, callback, caller_pid, state)
   end
 
   def handle_cast(cast, state) do
@@ -234,8 +251,8 @@ defmodule Exdis.Database.KeyOwner do
   ## Private Function Definitions
   ## ------------------------------------------------------------------
 
-  defp start_and_acquire_lock(database, key, lock_owner_pid, lock_ref_transfer_ref) do
-    init_args = [database, key, lock_owner_pid, lock_ref_transfer_ref]
+  defp start_and_acquire_lock(database, key, lock_owner_pid, lock_ref_transfer_ref, futures_owner) do
+    init_args = [database, key, lock_owner_pid, lock_ref_transfer_ref, futures_owner]
     :proc_lib.start(__MODULE__, :proc_lib_init, init_args)
   end
 
@@ -277,25 +294,26 @@ defmodule Exdis.Database.KeyOwner do
   ## Active Lock
   ## ------------------------------------------------------------------
 
-  defp handle_acquire_lock_request(ref, owner_pid, state(lock: lock) = state) do
+  defp handle_acquire_lock_request(ref, owner_pid, futures_owner, state(lock: lock) = state) do
     owner_mon = Process.monitor(owner_pid)
     case lock do
       nil ->
-        state = grant_lock(ref, owner_pid, owner_mon, state)
+        state = grant_lock(ref, owner_pid, owner_mon, futures_owner, state)
         {:noreply, state}
       _ ->
-        state = enqueue_pending_lock(ref, owner_pid, owner_mon, state)
+        state = enqueue_pending_lock(ref, owner_pid, owner_mon, futures_owner, state)
         {:noreply, state}
     end
   end
 
-  defp grant_lock(ref, owner_pid, owner_mon, state(lock: nil, value_state: value_state) = state) do
+  defp grant_lock(ref, owner_pid, owner_mon, futures_owner, state(lock: nil, value_state: value_state) = state) do
     send(owner_pid, {ref, :ok})
     new_lock = lock(
       ref: ref,
       owner_pid: owner_pid,
       owner_mon: owner_mon,
-      uncommitted_value_state: value_state)
+      uncommitted_value_state: value_state,
+      futures_owner: futures_owner)
 
     state(state, lock: new_lock)
   end
@@ -354,7 +372,7 @@ defmodule Exdis.Database.KeyOwner do
   ## Pending Locks
   ## ------------------------------------------------------------------
 
-  defp enqueue_pending_lock(ref, owner_pid, owner_mon, state) do
+  defp enqueue_pending_lock(ref, owner_pid, owner_mon, futures_owner, state) do
     state(pending_locks: pending_locks) = state
     pending_locks(
       all: all, owner_mons: owner_mons, queue: queue,
@@ -364,8 +382,8 @@ defmodule Exdis.Database.KeyOwner do
       pending_lock(
         owner_pid: owner_pid,
         owner_mon: owner_mon,
-        queue_index: queue_index_counter
-      )
+        queue_index: queue_index_counter,
+        futures_owner: futures_owner)
 
     all = Map.put(all, ref, new_pending_lock)
     owner_mons = Map.put(owner_mons, owner_mon, ref)
@@ -388,13 +406,14 @@ defmodule Exdis.Database.KeyOwner do
         pending_lock(
           owner_pid: owner_pid,
           owner_mon: owner_mon,
-          queue_index: ^queue_index
+          queue_index: ^queue_index,
+          futures_owner: futures_owner
         ) = pending_lock
 
         {^ref, owner_mons} = Map.pop(owner_mons, owner_mon)
         pending_locks = pending_locks(pending_locks, all: all, owner_mons: owner_mons, queue: queue)
         state = state(state, pending_locks: pending_locks)
-        grant_lock(ref, owner_pid, owner_mon, state)
+        grant_lock(ref, owner_pid, owner_mon, futures_owner, state)
       false ->
         state
     end
@@ -419,16 +438,17 @@ defmodule Exdis.Database.KeyOwner do
   ## ------------------------------------------------------------------
 
   defp perform_value_manipulation(manipulation_cb, lock, state) do
-    lock(owner_pid: owner_pid, uncommitted_value_state: value_state) = lock
+    lock(uncommitted_value_state: value_state) = lock
 
     case manipulation_cb.(value_state) do
       :ok ->
         {:ok, state}
 
       {:ok, reply} ->
+        lock(futures_owner: futures_owner) = lock
         future_cb = fn -> {:finished, reply} end # FIXME
-        {future_ref, state} = add_future(owner_pid, future_cb, state)
-        {{:ok, future_ref}, state}
+        {future_ref, state} = add_future(futures_owner, future_cb, state)
+        {{:ok_async, self(), future_ref}, state}
 
       {:ok_and_update, value_state} ->
         lock = lock(lock, uncommitted_value_state: value_state)
@@ -436,11 +456,12 @@ defmodule Exdis.Database.KeyOwner do
         {:ok, state}
 
       {:ok_and_update, reply, value_state} ->
+        lock(futures_owner: futures_owner) = lock
         future_cb = fn -> {:finished, reply} end # FIXME
-        {future_ref, state} = add_future(owner_pid, future_cb, state)
+        {future_ref, state} = add_future(futures_owner, future_cb, state)
         lock = lock(lock, uncommitted_value_state: value_state)
         state = state(state, lock: lock)
-        {{:ok, future_ref}, state}
+        {{:ok_async, self(), future_ref}, state}
 
       {:error, reason} ->
         {{:error, reason}, state}
@@ -459,6 +480,7 @@ defmodule Exdis.Database.KeyOwner do
   defp add_future(owner_pid, generate_cb, state) do
     state(futures: futures) = state
     ref = Process.monitor(owner_pid)
+    #Logger.info("Future added: #{inspect ref}")
     future = future(owner_pid: owner_pid, generate_cb: generate_cb)
     futures = Map.put(futures, ref, future)
     state = state(state, futures: futures)
@@ -470,18 +492,28 @@ defmodule Exdis.Database.KeyOwner do
     future(generate_cb: generate_cb) = future
 
     case generate_cb.() do
-      {:more, chunk, generate_cb} ->
+      {:more, part, generate_cb} ->
+        #Logger.info("Future #{inspect ref} being consumed...")
         future = future(future, generate_cb: generate_cb)
         futures = Map.replace!(futures, ref, future)
         state = state(state, futures: futures)
-        {{:more, chunk}, state}
+        {{:more, part}, state}
 
-      {:finished, chunk} ->
+      {:finished, final} ->
+        #Logger.info("Future #{inspect ref} consumed")
         Process.demonitor(ref, [:flush])
         futures = Map.delete(futures, ref)
         state = state(state, futures: futures)
-        {{:finished, chunk}, state}
+        {{:finished, final}, state}
     end
+  end
+
+  defp perform_future_rejection(ref, _future, state) do
+    state(futures: futures) = state
+    Process.demonitor(ref, [:flush])
+    futures = Map.delete(futures, ref)
+    state = state(state, futures: futures)
+    {:ok, state}
   end
 
   defp handle_future_owner_death(ref, state) do
@@ -502,6 +534,16 @@ defmodule Exdis.Database.KeyOwner do
     end
   end
 
+  defp make_call_as_future_updater(pid, mon, future_ref, call_cb) do
+    GenServer.cast(pid, {:future_updater_call, future_ref, self(), call_cb})
+    receive do
+      {^future_ref, result} ->
+        result
+      {:"DOWN", ^mon, _, _, reason} ->
+        exit({reason, {__MODULE__, :make_call_as_future_updater, [pid, mon, future_ref, call_cb]}})
+    end
+  end
+
   defp handle_future_owner_call(ref, callback, state) do
     state(futures: futures) = state
 
@@ -509,6 +551,19 @@ defmodule Exdis.Database.KeyOwner do
       future(owner_pid: owner_pid) = future ->
         {result, state} = callback.(ref, future, state)
         send(owner_pid, {ref, result})
+        {:noreply, state}
+      nil ->
+        {:stop, {:mismatched_future_owner_call, ref, callback}, state}
+    end
+  end
+
+  defp handle_future_manipulation_call(ref, caller_pid, callback, state) do
+    state(futures: futures) = state
+
+    case Map.get(futures, ref) do
+      future() = future ->
+        {result, state} = callback.(ref, future, state)
+        send(caller_pid, {ref, result})
         {:noreply, state}
       nil ->
         {:stop, {:mismatched_future_owner_call, ref, callback}, state}
