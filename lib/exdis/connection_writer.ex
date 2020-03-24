@@ -68,8 +68,8 @@ defmodule Exdis.ConnectionWriter do
     exit(:normal)
   end
 
-  def handle_write(:direct, resp_value, state) do
-    _ = perform_direct_write(resp_value, state)
+  def handle_write(:direct, value, state) do
+    _ = perform_direct_write(value, state)
     loop(state)
   end
 
@@ -82,12 +82,48 @@ defmodule Exdis.ConnectionWriter do
   ## Private Function Definitions - Direct Write
   ## ------------------------------------------------------------------
 
-  def perform_direct_write(resp_value, state) do
+  def perform_direct_write(value, state) do
     #Logger.info("Direct write started")
     state(transport: transport, socket: socket) = state
-    data = Exdis.RESP.Value.encode(resp_value)
+    data = 
+      case value do 
+        :ok -> 
+          Exdis.RESP.Value.encode({:simple_string, "OK"})
+        :queued -> 
+          Exdis.RESP.Value.encode({:simple_string, "QUEUED"})
+        {:error, reason} -> 
+          reason_iodata = error_reason_to_iodata(reason)
+          Exdis.RESP.Value.encode({:error, reason_iodata})
+        other ->
+          Exdis.RESP.Value.encode(other)
+      end
     transport.send(socket, data)
     #Logger.info("Direct write finished")
+  end
+
+  defp error_reason_to_iodata(reason) do
+    case reason do
+      :bad_syntax ->
+        "ERR syntax error"
+      {:unknown_command, command_name} ->
+        "ERR unknown command '#{command_name}'"
+      :key_of_wrong_type ->
+        "WRONGTYPE Operation against a key holding the wrong kind of value"
+      {:not_an_integer_or_out_of_range, argument_name} ->
+        "ERR #{argument_name} is not an integer or out of range"
+      :increment_or_decrement_would_overflow ->
+        "ERR increment or decrement would overflow"
+      {:not_a_valid_float, argument_name} ->
+        "ERR #{argument_name} is not a valid float"
+      :increment_would_produce_NaN_or_infinity ->
+        "ERR increment would produce NaN or Infinity"
+      {:calls_cannot_be_nested, command_name} ->
+        "ERR #{command_name} calls can not be nested"
+      {:command_without_another_first, dependent_name, dependency_name} ->
+        "ERR #{dependent_name} without #{dependency_name}"
+      :transaction_discarded_because_of_previous_errors ->
+        "EXECABORT Transaction discarded because of previous errors"
+    end
   end
 
   ## ------------------------------------------------------------------

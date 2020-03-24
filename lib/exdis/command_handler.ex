@@ -1,4 +1,5 @@
 defmodule Exdis.CommandHandler do
+  require Logger
   require Record
 
   ## ------------------------------------------------------------------
@@ -9,6 +10,12 @@ defmodule Exdis.CommandHandler do
     writer_pid: nil,
     database: nil,
     transaction: nil
+  )
+
+  Record.defrecord(:transaction,
+    keys_to_lock: MapSet.new(),
+    queue: [], # accumulated in reverse order
+    errored: false
   )
 
   ## ------------------------------------------------------------------
@@ -22,56 +29,119 @@ defmodule Exdis.CommandHandler do
   end
 
   def receive_and_handle(state, recv_fun) do
-    case Exdis.Command.recv(recv_fun) do
-      {:ok, keys, handler} ->
-        run_command_handler(keys, handler, state)
-      :start_transaction ->
-        exit(:todo)
-      :discard_transaction ->
-        exit(:todo)
-      :commit_transaction ->
-        exit(:todo)
-      {:error, {:parse, reason}} ->
-        # TODO discard transaction
-        reason_iodata = error_reason_to_iodata(reason)
-        dispatch_write(state, :direct, {:error, reason_iodata})
+    reception_result = Exdis.Command.recv(recv_fun)
+    handle_reception_result(state, reception_result)
+  end
+
+  ## ------------------------------------------------------------------
+  ## Private Function Definitions - Handling Command Reception
+  ## ------------------------------------------------------------------
+
+  defp handle_reception_result(state, {:ok, keys, handler}) do
+    state(transaction: transaction) = state
+    case transaction do
+      nil ->
+        key_locks = acquire_key_locks(state, keys)
+        run_command_handler(state, key_locks, handler)
+        release_key_locks(key_locks)
+        state
+      transaction(keys_to_lock: keys_to_lock, queue: queue) ->
+        keys_to_lock = MapSet.union(keys_to_lock, MapSet.new(keys))
+        queue = [handler | queue]
+        transaction = transaction(transaction, keys_to_lock: keys_to_lock, queue: queue)
+        dispatch_direct_write(state, :queued)
+        state(state, transaction: transaction)
+    end
+  end
+
+  defp handle_reception_result(state, :start_transaction) do
+    state(transaction: transaction) = state
+    case transaction do
+      nil ->
+        dispatch_direct_write(state, :ok)
+        state(state, transaction: transaction())
+      transaction() ->
+        dispatch_direct_write(state, {:error, {:calls_cannot_be_nested, "MULTI"}})
         state
     end
   end
 
-  ## ------------------------------------------------------------------
-  ## Private Function Definitions
-  ## ------------------------------------------------------------------
-
-  defp dispatch_write(state, type, args) do
-    state(writer_pid: write_pid) = state
-    Exdis.ConnectionWriter.dispatch(write_pid, type, args)
+  defp handle_reception_result(state, :execute_transaction) do
+    state(transaction: transaction) = state
+    case transaction do
+      transaction(errored: false, keys_to_lock: keys_to_lock, queue: queue) ->
+        execute_transaction(state, keys_to_lock, queue)
+      transaction(errored: true) ->
+        dispatch_direct_write(state, {:error, :transaction_discarded_because_of_previous_errors})
+        state(state, transaction: nil)
+      nil ->
+        dispatch_direct_write(state, {:error, {:command_without_another_first, "EXEC", "MULTI"}})
+        state
+    end
   end
 
-  defp run_command_handler(keys, handler, state) do
-    key_locks = acquire_key_locks(keys, state)
+  defp handle_reception_result(state, :discard_transaction) do
+    state(transaction: transaction) = state
+    case transaction do
+      transaction() ->
+        dispatch_direct_write(state, :ok)
+        state(state, transaction: nil)
+      nil ->
+        dispatch_direct_write(state, {:error, {:command_without_another_first, "DISCARD", "MULTI"}})
+        state
+    end
+  end
+
+  defp handle_reception_result(state, {:error, {:parse, reason}}) do
+    state(transaction: transaction) = state
+    case transaction do
+      nil ->
+        dispatch_direct_write(state, {:error, reason})
+        state
+      transaction() ->
+        dispatch_direct_write(state, {:error, reason})
+        transaction = transaction(transaction, errored: true)
+        state(state, transaction: transaction)
+    end
+  end
+
+  defp dispatch_direct_write(state, args) do
+    state(writer_pid: write_pid) = state
+    Exdis.ConnectionWriter.dispatch(write_pid, :direct, args)
+  end
+
+  defp dispatch_future_write(state, args) do
+    state(writer_pid: write_pid) = state
+    Exdis.ConnectionWriter.dispatch(write_pid, :future, args)
+  end
+
+  ## ------------------------------------------------------------------
+  ## Private Function Definitions - Executing Transactions
+  ## ------------------------------------------------------------------
+
+  defp execute_transaction(state, keys_to_lock, queue) do
+    Logger.info("Executing transaction for keys #{inspect keys_to_lock} and queue #{inspect queue}")
+    key_locks = acquire_key_locks(state, keys_to_lock)
+    command_handlers = Enum.reverse(queue)
+    Enum.each(command_handlers, &run_command_handler(state, key_locks, &1))
+    release_key_locks(key_locks)
+    state(state, transaction: nil)
+  end
+
+  defp run_command_handler(state, key_locks, handler) do
     case handler.(key_locks) do
       :ok ->
-        release_key_locks(key_locks)
-        dispatch_write(state, :direct, {:simple_string, "OK"})
-        state
+        dispatch_direct_write(state, :ok)
       {:ok_async, key_owner_pid, future_ref} ->
-        release_key_locks(key_locks)
-        dispatch_write(state, :future, {key_owner_pid, future_ref})
-        state
+        dispatch_future_write(state, {key_owner_pid, future_ref})
       {:error, reason} ->
-        release_key_locks(key_locks)
-        reason_iodata = error_reason_to_iodata(reason)
-        dispatch_write(state, :direct, {:error, reason_iodata})
-        state
+        dispatch_direct_write(state, {:error, reason})
     end
   end
 
-  defp acquire_key_locks(keys, state) do
+  defp acquire_key_locks(state, keys) do
     state(writer_pid: writer_pid, database: database) = state
-    unique_keys = Enum.uniq(keys)
-
-    Enum.reduce(unique_keys, %{},
+    Enum.reduce(keys, %{},
       fn key, acc ->
         {pid, lock_ref} = Exdis.Database.KeyOwner.acquire_lock(database, key, writer_pid)
         Map.put(acc, key, {pid, lock_ref})
@@ -84,24 +154,5 @@ defmodule Exdis.CommandHandler do
         :ok = Exdis.Database.KeyOwner.release_lock(pid, lock_ref)
         Process.demonitor(lock_ref)
       end)
-  end
-
-  defp error_reason_to_iodata(reason) do
-    case reason do
-      :bad_syntax ->
-        "ERR syntax error"
-      {:unknown_command, command_name} ->
-        "ERR unknown command '#{command_name}'"
-      :key_of_wrong_type ->
-        "WRONGTYPE Operation against a key holding the wrong kind of value"
-      {:not_an_integer_or_out_of_range, argument_name} ->
-        "ERR #{argument_name} is not an integer or out of range"
-      :increment_or_decrement_would_overflow ->
-        "ERR increment or decrement would overflow"
-      {:not_a_valid_float, argument_name} ->
-        "ERR #{argument_name} is not a valid float"
-      :increment_would_produce_NaN_or_infinity ->
-        "ERR increment would produce NaN or Infinity"
-    end
   end
 end

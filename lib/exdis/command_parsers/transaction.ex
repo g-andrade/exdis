@@ -4,7 +4,7 @@ defmodule Exdis.CommandParsers.Transaction do
   ## ------------------------------------------------------------------
 
   def discard([]) do
-    {:ok, :discard_transaction}
+    :discard_transaction
   end
 
   def discard(_) do
@@ -16,7 +16,7 @@ defmodule Exdis.CommandParsers.Transaction do
   ## ------------------------------------------------------------------
 
   def exec([]) do
-    {:ok, :commit_transaction}
+    :execute_transaction
   end
 
   def exec(_) do
@@ -28,7 +28,7 @@ defmodule Exdis.CommandParsers.Transaction do
   ## ------------------------------------------------------------------
 
   def multi([]) do
-    {:ok, :start_transaction}
+    :start_transaction
   end
 
   def multi(_) do
