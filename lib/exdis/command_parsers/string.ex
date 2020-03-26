@@ -180,6 +180,37 @@ defmodule Exdis.CommandParsers.String do
   end
 
   ## ------------------------------------------------------------------
+  ## MSET Command
+  ## ------------------------------------------------------------------
+
+  def mset([_|_] = args) do
+    mset_recur(args, [])
+  end
+
+  def mset(_) do
+    {:error, :bad_syntax}
+  end
+
+  defp mset_recur([{:string, key_name}, resp_value | next_args], pairs_acc) do
+    case Exdis.CommandParsers.Util.maybe_coerce_into_string(resp_value) do
+      {:ok, value} ->
+        pairs_acc = [{key_name, value} | pairs_acc]
+        mset_recur(next_args, pairs_acc)
+      {:error, _} ->
+        {:error, :bad_syntax}
+    end
+  end
+
+  defp mset_recur([], pairs_acc) do
+    {key_names, values} = Enum.unzip(pairs_acc)
+    {:ok, key_names, &Exdis.Database.Value.String.mset(&1, values), [:use_varargs]}
+  end
+
+  defp mset_recur([_|_], _) do
+    {:error, :bad_syntax}
+  end
+
+  ## ------------------------------------------------------------------
   ## SET Command
   ## ------------------------------------------------------------------
 

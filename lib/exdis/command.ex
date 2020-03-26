@@ -50,6 +50,7 @@ defmodule Exdis.Command do
       "INCRBY" => &Exdis.CommandParsers.String.increment_by/1,
       "INCRBYFLOAT" => &Exdis.CommandParsers.String.increment_by_float/1,
       "MGET" => &Exdis.CommandParsers.String.mget/1,
+      "MSET" => &Exdis.CommandParsers.String.mset/1,
       "SET" => &Exdis.CommandParsers.String.set/1,
       "STRLEN" => &Exdis.CommandParsers.String.str_length/1,
 

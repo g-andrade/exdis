@@ -162,6 +162,8 @@ defmodule Exdis.CommandHandler do
     %{owners: all_key_owners} = all_key_locks
     handler_args = for key <- keys, do: Map.fetch!(all_key_owners, key)
     case apply_command_handler_args(handler_fun, handler_args, opts) do
+      :ok ->
+        [:ok]
       {:ok, reply} ->
         [reply]
       {:error, _} = error ->

@@ -411,8 +411,13 @@ defmodule Exdis.Database.KeyOwner do
   end
 
   defp maybe_prepare_streamed_reply_success(state, reply_success, _) do
-    reply = {:ok, reply_success}
-    {reply, state}
+    case reply_success do
+      :ok ->
+        {:ok, state}
+      _ ->
+        reply = {:ok, reply_success}
+        {reply, state}
+    end
   end
 
   defp stream_reader_pid(state, reader) do

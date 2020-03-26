@@ -242,6 +242,23 @@ defmodule Exdis.Database.Value.String do
   end
 
   ## ------------------------------------------------------------------
+  ## MSET Command
+  ## ------------------------------------------------------------------
+
+  def mset(key_owners, values) do
+    mset_recur(key_owners, values)
+  end
+
+  defp mset_recur([key_owner|next_key_owners], [value|next_values]) do
+    :ok = Exdis.Database.KeyOwner.write(key_owner, &handle_set(&1, value))
+    mset_recur(next_key_owners, next_values)
+  end
+
+  defp mset_recur([], []) do
+    :ok
+  end
+
+  ## ------------------------------------------------------------------
   ## SET Command
   ## ------------------------------------------------------------------
 
@@ -251,7 +268,7 @@ defmodule Exdis.Database.Value.String do
 
   defp handle_set(_state, bytes) do
     value = Exdis.IoData.new(bytes)
-    reply_value = {:simple_string, "OK"}
+    reply_value = :ok
     state = string(repr: :iodata, value: value)
     {:ok, reply_value, state}
   end
