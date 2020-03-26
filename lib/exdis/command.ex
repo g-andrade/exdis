@@ -33,6 +33,7 @@ defmodule Exdis.Command do
   defp known_parsers() do
     %{
       # Keys
+      "DEL" => &Exdis.CommandParsers.Key.delete/1,
       "KEYS" => &Exdis.CommandParsers.Key.keys/1,
 
       # Server

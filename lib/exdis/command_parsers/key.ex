@@ -1,5 +1,30 @@
 defmodule Exdis.CommandParsers.Key do
   ## ------------------------------------------------------------------
+  ## DEL Command
+  ## ------------------------------------------------------------------
+
+  def delete([_|_] = args) do
+    delete_recur(args, [])
+  end
+
+  def delete([]) do
+    {:error, :bad_syntax}
+  end
+
+  defp delete_recur([{:string, key_name} | next_args], key_names_acc) do
+    key_names_acc = [key_name | key_names_acc]
+    delete_recur(next_args, key_names_acc)
+  end
+
+  defp delete_recur([], key_names_acc) do
+    {:ok, key_names_acc, &Exdis.Database.Key.delete(&1), [:varargs]}
+  end
+
+  defp delete_recur([_|_], _) do
+    {:error, :bad_syntax}
+  end
+
+  ## ------------------------------------------------------------------
   ## KEYS Command
   ## ------------------------------------------------------------------
 
