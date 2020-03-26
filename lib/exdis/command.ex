@@ -14,7 +14,7 @@ defmodule Exdis.Command do
         parse(name, args)
     end
   end
-    
+
   ## ------------------------------------------------------------------
   ## Private Function Definitions
   ## ------------------------------------------------------------------
@@ -49,6 +49,7 @@ defmodule Exdis.Command do
       "INCR" => &Exdis.CommandParsers.String.increment/1,
       "INCRBY" => &Exdis.CommandParsers.String.increment_by/1,
       "INCRBYFLOAT" => &Exdis.CommandParsers.String.increment_by_float/1,
+      "MGET" => &Exdis.CommandParsers.String.mget/1,
       "SET" => &Exdis.CommandParsers.String.set/1,
       "STRLEN" => &Exdis.CommandParsers.String.str_length/1,
 

@@ -28,8 +28,8 @@ defmodule Exdis.ConnectionWriter do
     :proc_lib.start_link(__MODULE__, :init, init_args)
   end
 
-  def dispatch(pid, arg) do
-    send(pid, {:write, arg})
+  def dispatch(pid, writes) do
+    send(pid, {:write, writes})
   end
 
   ## ------------------------------------------------------------------
@@ -60,21 +60,25 @@ defmodule Exdis.ConnectionWriter do
     end
   end
 
-  defp handle_msg(state, {:write, arg}) do
-    handle_write(state, arg)
+  defp handle_msg(state, {:write, writes}) do
+    handle_writes(state, writes)
   end
 
   defp handle_msg(state(conn_pid: pid), {:"EXIT", pid, _}) do
     exit(:normal)
   end
 
-  defp handle_write(state, {:stream, key_owner_pid, stream_ref}) do
+  defp handle_writes(state, [{:stream, key_owner_pid, stream_ref} | next]) do
     _ = perform_streamed_write(state, key_owner_pid, stream_ref)
-    loop(state)
+    handle_writes(state, next)
   end
 
-  defp handle_write(state, resp_value) do
+  defp handle_writes(state, [resp_value | next]) do
     _ = perform_direct_write(state, resp_value)
+    handle_writes(state, next)
+  end
+
+  defp handle_writes(state, []) do
     loop(state)
   end
 

@@ -44,6 +44,10 @@ defmodule Exdis.CommandHandler do
   ## ------------------------------------------------------------------
 
   defp handle_reception_result(state, {:ok, command_key_names, command_handler_fun}) do
+    handle_reception_result(state, {:ok, command_key_names, command_handler_fun, []})
+  end
+
+  defp handle_reception_result(state, {:ok, command_key_names, command_handler_fun, opts}) do
     state(transaction: transaction) = state
 
     case transaction do
@@ -51,16 +55,17 @@ defmodule Exdis.CommandHandler do
         state(database_index: database_index) = state
         command_keys = for name <- command_key_names, do: {database_index, name}
         state(connection_writer_pid: connection_writer_pid) = state
-        {:ok, key_locks} = acquire_key_locks(state, command_keys, connection_writer_pid)
-        reply = run_command_handler(key_locks, command_keys, command_handler_fun)
+        unique_command_keys = Enum.uniq(command_keys)
+        {:ok, key_locks} = acquire_key_locks(state, unique_command_keys, connection_writer_pid)
+        replies = run_command_handler(key_locks, command_keys, command_handler_fun, opts)
         :ok = release_key_locks(key_locks)
-        Exdis.ConnectionWriter.dispatch(connection_writer_pid, reply)
+        Exdis.ConnectionWriter.dispatch(connection_writer_pid, replies)
         state
       transaction(keys_to_lock: trx_keys_to_lock, queue: queue) ->
         state(database_index: database_index) = state
         command_keys = for name <- command_key_names, do: {database_index, name}
         trx_keys_to_lock = MapSet.union(trx_keys_to_lock, MapSet.new(command_keys))
-        queue = [{command_keys, command_handler_fun} | queue]
+        queue = [{command_keys, command_handler_fun, opts} | queue]
         transaction = transaction(transaction, keys_to_lock: trx_keys_to_lock, queue: queue)
         dispatch_reply(state, :queued)
         state(state, transaction: transaction)
@@ -120,7 +125,7 @@ defmodule Exdis.CommandHandler do
 
   defp dispatch_reply(state, reply) do
     state(connection_writer_pid: connection_writer_pid) = state
-    Exdis.ConnectionWriter.dispatch(connection_writer_pid, reply)
+    Exdis.ConnectionWriter.dispatch(connection_writer_pid, [reply])
   end
 
   ## ------------------------------------------------------------------
@@ -134,33 +139,45 @@ defmodule Exdis.CommandHandler do
 
     {:ok, all_key_locks} = acquire_key_locks(state, keys_to_lock, connection_writer_pid)
     command_handlers = Enum.reverse(queue)
-    command_replies =
+    commands_replies =
       Enum.map(command_handlers,
-        fn ({command_keys, handler_fun}) ->
-          run_command_handler(all_key_locks, command_keys, handler_fun)
+        fn ({command_keys, handler_fun, opts}) ->
+          run_command_handler(all_key_locks, command_keys, handler_fun, opts)
         end)
     :ok = release_key_locks(all_key_locks)
 
-    reply_array_start = {:partial, {:array_start, length(command_replies), []}}
+    reply_array_start = {:partial, {:array_start, length(commands_replies), []}}
     reply_array_finish = {:partial, {:array_finish, []}}
-    Exdis.ConnectionWriter.dispatch(connection_writer_pid, reply_array_start)
-    Enum.each(command_replies,
-      fn command_reply ->
-        Exdis.ConnectionWriter.dispatch(connection_writer_pid, command_reply)
+    Exdis.ConnectionWriter.dispatch(connection_writer_pid, [reply_array_start])
+    Enum.each(commands_replies,
+      fn command_replies ->
+        Exdis.ConnectionWriter.dispatch(connection_writer_pid, command_replies)
       end)
-    Exdis.ConnectionWriter.dispatch(connection_writer_pid, reply_array_finish)
+    Exdis.ConnectionWriter.dispatch(connection_writer_pid, [reply_array_finish])
 
     state(state, transaction: nil, database_index: database_index)
   end
 
-  defp run_command_handler(all_key_locks, keys, handler_fun) do
+  defp run_command_handler(all_key_locks, keys, handler_fun, opts) do
     %{owners: all_key_owners} = all_key_locks
     handler_args = for key <- keys, do: Map.fetch!(all_key_owners, key)
-    case apply(handler_fun, handler_args) do
+    case apply_command_handler_args(handler_fun, handler_args, opts) do
       {:ok, reply} ->
-        reply
+        [reply]
       {:error, _} = error ->
-        error
+        [error]
+      {:success_array, replies} ->
+        reply_array_start = {:partial, {:array_start, length(replies), []}}
+        reply_array_members = replies
+        reply_array_finish = {:partial, {:array_finish, []}}
+        [reply_array_start | reply_array_members] ++ [reply_array_finish]
+    end
+  end
+
+  defp apply_command_handler_args(handler_fun, handler_args, opts) do
+    case :use_varargs in opts do
+      false -> apply(handler_fun, handler_args)
+      true -> handler_fun.(handler_args)
     end
   end
 

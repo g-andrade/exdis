@@ -223,6 +223,25 @@ defmodule Exdis.Database.Value.String do
   end
 
   ## ------------------------------------------------------------------
+  ## MGET Command
+  ## ------------------------------------------------------------------
+
+  def mget(key_owners) do
+    reply_array_members =
+      Enum.map(key_owners,
+        fn key_owner ->
+          case Exdis.Database.KeyOwner.read(key_owner, &handle_get(&1)) do
+            {:ok, reply} ->
+              reply
+            {:error, :key_of_wrong_type} ->
+              nil
+          end
+        end)
+
+    {:success_array, reply_array_members}
+  end
+
+  ## ------------------------------------------------------------------
   ## SET Command
   ## ------------------------------------------------------------------
 
