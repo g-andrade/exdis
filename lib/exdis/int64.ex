@@ -11,7 +11,7 @@ defmodule Exdis.Int64 do
   ## Record and Type Definitions
   ## ------------------------------------------------------------------
 
-  @opaque t :: -0x8000000000000000..+0x7FFFFFFFFFFFFFFF
+  @opaque t :: -0x8000000000000000..0x7FFFFFFFFFFFFFFF
 
   ## ------------------------------------------------------------------
   ## API Functions

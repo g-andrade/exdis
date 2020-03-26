@@ -15,6 +15,6 @@ defmodule Exdis.RESP.SimpleString do
   def encode(iodata) do
     string = :erlang.iolist_to_binary(iodata)
     :nomatch = :binary.match(string, ["\r", "\n"])
-    [string, "\r\n"]
+    [string, ?\r, ?\n]
   end
 end

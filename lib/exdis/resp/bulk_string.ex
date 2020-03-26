@@ -14,9 +14,15 @@ defmodule Exdis.RESP.BulkString do
 
   def encode(iodata) do
     size = :erlang.iolist_size(iodata)
-    [
-      Exdis.RESP.Integer.encode(size),
-      iodata, ?\r, ?\n
-    ]
+    [encode_start(size, iodata), encode_finish([])]
   end
+
+  def encode_start(size, iodata) do
+    encoded_size = Exdis.RESP.Integer.encode(size)
+    [encoded_size, iodata]
+  end
+
+  def encode_more(iodata), do: iodata
+
+  def encode_finish(iodata), do: [iodata, ?\r, ?\n]
 end

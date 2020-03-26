@@ -1,5 +1,4 @@
-defmodule Exdis.Database.String do
-  use Bitwise
+defmodule Exdis.Database.Value.String do
   require Record
 
   ## ------------------------------------------------------------------
@@ -7,6 +6,7 @@ defmodule Exdis.Database.String do
   ## ------------------------------------------------------------------
 
   @max_iodata_fragments_upon_read 100
+  @streamable_value_threshold (64 * 1024) # FIXME
 
   ## ------------------------------------------------------------------
   ## Type and Record Definitions
@@ -28,30 +28,29 @@ defmodule Exdis.Database.String do
   ## APPEND Command
   ## ------------------------------------------------------------------
 
-  def append(locks, key, tail) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_append(&1, tail))
+  def append(key_owner, tail) do
+    Exdis.Database.KeyOwner.write(key_owner, &handle_append(&1, tail))
   end
 
-  def handle_append(string() = state, tail) do
+  defp handle_append(string() = state, tail) do
     state = coerce_into_iodata(state)
     string(repr: :iodata, value: value) = state
     value = Exdis.IoData.append(value, tail)
     size_after_append = Exdis.IoData.size(value)
-    reply = {:integer, size_after_append}
+    reply_value = {:integer, size_after_append}
     state = string(state, value: value)
-    {:ok_and_update, reply, state}
+    {:ok, reply_value, state}
   end
 
-  def handle_append(nil, tail) do
+  defp handle_append(nil, tail) do
     value = Exdis.IoData.new(tail)
-    size_after_append = Exdis.IoData.size(value)
-    reply = {:integer, size_after_append}
+    size = Exdis.IoData.size(value)
+    reply_value = {:integer, size}
     state = string(repr: :iodata, value: value)
-    {:ok_and_update, reply, state}
+    {:ok, reply_value, state}
   end
 
-  def handle_append(_state, _tail) do
+  defp handle_append(_state, _tail) do
     {:error, :key_of_wrong_type}
   end
 
@@ -59,35 +58,21 @@ defmodule Exdis.Database.String do
   ## GET Command
   ## ------------------------------------------------------------------
 
-  def get(locks, key) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_get/1)
+  def get(key_owner) do
+    Exdis.Database.KeyOwner.read(key_owner, &handle_get/1)
   end
 
-  def handle_get(string() = state) do
-    case maybe_flatten_iodata(state, @max_iodata_fragments_upon_read) do
-      string(repr: :iodata, value: value) = state ->
-        value_string = Exdis.IoData.bytes(value)
-        reply = {:string, value_string}
-        {:ok_and_update, reply, state}
-
-      string(repr: :int64, value: value) ->
-        value_string = Exdis.Int64.to_decimal_string(value)
-        reply = {:string, value_string}
-        {:ok, reply}
-
-      string(repr: :float, value: value) ->
-        value_string = Exdis.Float.to_decimal_string(value)
-        reply = {:string, value_string}
-        {:ok, reply}
-    end
+  defp handle_get(string() = state) do
+    state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
+    reply_value = maybe_string_stream(state)
+    {:ok, reply_value, state}
   end
 
-  def handle_get(nil) do
+  defp handle_get(nil) do
     {:ok, nil}
   end
 
-  def handle_get(_state) do
+  defp handle_get(_state) do
     {:error, :key_of_wrong_type}
   end
 
@@ -95,25 +80,24 @@ defmodule Exdis.Database.String do
   ## GETBIT Command
   ## ------------------------------------------------------------------
 
-  def get_bit(locks, key, offset) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_get_bit(&1, offset))
+  def get_bit(key_owner, offset) do
+    Exdis.Database.KeyOwner.read(key_owner, &handle_get_bit(&1, offset))
   end
 
-  def handle_get_bit(string() = state, offset) do
+  defp handle_get_bit(string() = state, offset) do
     state = coerce_into_iodata(state)
     string(value: value) = state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
     bit_value = Exdis.IoData.get_bit(value, offset)
-    reply = {:integer, bit_value}
-    {:ok_and_update, reply, state}
+    reply_value = {:integer, bit_value}
+    {:ok, reply_value, state}
   end
 
-  def handle_get_bit(nil, _offset) do
-    reply = {:integer, 0}
-    {:ok, reply}
+  defp handle_get_bit(nil, _offset) do
+    reply_value = {:integer, 0}
+    {:ok, reply_value}
   end
 
-  def handle_get_bit(_state, _offset) do
+  defp handle_get_bit(_state, _offset) do
     {:error, :key_of_wrong_type}
   end
 
@@ -121,25 +105,24 @@ defmodule Exdis.Database.String do
   ## GETRANGE Command
   ## ------------------------------------------------------------------
 
-  def get_range(locks, key, start, finish) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_get_range(&1, start, finish))
+  def get_range(key_owner, start, finish) do
+    Exdis.Database.KeyOwner.read(key_owner, &handle_get_range(&1, start, finish))
   end
 
-  def handle_get_range(string() = state, start, finish) do
+  defp handle_get_range(string() = state, start, finish) do
     state = coerce_into_iodata(state)
     string(value: value) = state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
     value_string = Exdis.IoData.get_range(value, start, finish)
-    reply = {:string, value_string}
-    {:ok_and_update, reply, state}
+    reply_value = {:string, value_string}
+    {:ok, reply_value, state}
   end
 
-  def handle_get_range(nil, _start, _finish) do
-    reply = {:string, ""}
-    {:ok, reply}
+  defp handle_get_range(nil, _start, _finish) do
+    reply_value = {:string, ""}
+    {:ok, reply_value}
   end
 
-  def handle_get_range(_state, _start, _finish) do
+  defp handle_get_range(_state, _start, _finish) do
     {:error, :key_of_wrong_type}
   end
 
@@ -147,29 +130,26 @@ defmodule Exdis.Database.String do
   ## GETSET Command
   ## ------------------------------------------------------------------
 
-  def get_set(locks, key, new_bytes) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_get_set(&1, new_bytes))
+  def get_set(key_owner, new_bytes) do
+    Exdis.Database.KeyOwner.write(key_owner, &handle_get_set(&1, new_bytes))
   end
 
-  def handle_get_set(string() = state, new_bytes) do
-    state = coerce_into_iodata(state)
-    string(repr: :iodata, value: old_value) = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
-    old_bytes = Exdis.IoData.bytes(old_value)
-    reply = {:string, old_bytes}
+  defp handle_get_set(string() = state, new_bytes) do
+    state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
+    reply_value = maybe_string_stream(state)
 
     new_value = Exdis.IoData.new(new_bytes)
     new_state = string(repr: :iodata, value: new_value)
-    {:ok_and_update, reply, new_state}
+    {:ok, reply_value, new_state}
   end
 
-  def handle_get_set(nil, bytes) do
+  defp handle_get_set(nil, bytes) do
     value = Exdis.IoData.new(bytes)
     state = string(repr: :iodata, value: value)
-    {:ok_and_update, nil, state}
+    {:ok, nil, state}
   end
 
-  def handle_get_set(_state, _new_bytes) do
+  defp handle_get_set(_state, _new_bytes) do
     {:error, :key_of_wrong_type}
   end
 
@@ -177,34 +157,33 @@ defmodule Exdis.Database.String do
   ## INCRBY Command
   ## ------------------------------------------------------------------
 
-  def increment_by(locks, key, increment) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_increment_by(&1, increment))
+  def increment_by(key_owner, increment) do
+    Exdis.Database.KeyOwner.write(key_owner, &handle_increment_by(&1, increment))
   end
 
-  def handle_increment_by(string() = state, increment) do
+  defp handle_increment_by(string() = state, increment) do
     case maybe_coerce_into_integer(state) do
       string(repr: :int64, value: value) = state ->
         case Exdis.Int64.add(value, increment) do
           {:ok, value} ->
-            reply = {:integer, value}
+            reply_value = {:integer, value}
             state = string(state, value: value)
-            {:ok_and_update, reply, state}
+            {:ok, reply_value, state}
           {:error, :overflow_or_underflow} ->
-            {:error_and_update, :increment_or_decrement_would_overflow, state}
+            {:error, :increment_or_decrement_would_overflow, state}
         end
       state ->
-        {:error_and_update, {:not_an_integer_or_out_of_range, "value"}, state}
+        {:error, {:not_an_integer_or_out_of_range, "value"}, state}
     end
   end
 
-  def handle_increment_by(nil, increment) do
-    reply = {:integer, increment}
+  defp handle_increment_by(nil, increment) do
+    reply_value = {:integer, increment}
     state = string(repr: :int64, value: increment)
-    {:ok_and_update, reply, state}
+    {:ok, reply_value, state}
   end
 
-  def handle_increment_by(_state, _increment) do
+  defp handle_increment_by(_state, _increment) do
     {:error, :key_of_wrong_type}
   end
 
@@ -212,35 +191,34 @@ defmodule Exdis.Database.String do
   ## INCRBYFLOAT Command
   ## ------------------------------------------------------------------
 
-  def increment_by_float(locks, key, increment) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_increment_by_float(&1, increment))
+  def increment_by_float(key_owner, increment) do
+    Exdis.Database.KeyOwner.write(key_owner, &handle_increment_by_float(&1, increment))
   end
 
-  def handle_increment_by_float(string() = state, increment) do
+  defp handle_increment_by_float(string() = state, increment) do
     case maybe_coerce_into_float(state) do
       string(repr: :float, value: value) = state ->
         case Exdis.Float.add(value, increment) do
           {:ok, value} ->
-            reply = {:string, Exdis.Float.to_decimal_string(value)}
+            reply_value = {:string, Exdis.Float.to_decimal_string(value)}
             state = string(state, value: value)
-            {:ok_and_update, reply, state}
+            {:ok, reply_value, state}
           {:error, :NaN_or_infinity} ->
-            {:error_and_update, :increment_would_produce_NaN_or_infinity, state}
+            {:error, :increment_would_produce_NaN_or_infinity, state}
         end
       state ->
-        {:error_and_update, {:not_a_valid_float, "value"}, state}
+        {:error, {:not_a_valid_float, "value"}, state}
     end
   end
 
-  def handle_increment_by_float(nil, increment) do
+  defp handle_increment_by_float(nil, increment) do
     value = Exdis.Float.new(increment)
-    reply = {:string, Exdis.Float.to_decimal_string(value)}
+    reply_value = {:string, Exdis.Float.to_decimal_string(value)}
     state = string(repr: :float, value: value)
-    {:ok_and_update, reply, state}
+    {:ok, reply_value, state}
   end
 
-  def handle_increment_by_float(_state, _increment) do
+  defp handle_increment_by_float(_state, _increment) do
     {:error, :key_of_wrong_type}
   end
 
@@ -248,50 +226,120 @@ defmodule Exdis.Database.String do
   ## SET Command
   ## ------------------------------------------------------------------
 
-  def set(locks, key, bytes) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_set(&1, bytes))
+  def set(key_owner, bytes) do
+    Exdis.Database.KeyOwner.write(key_owner, &handle_set(&1, bytes))
   end
 
-  def handle_set(_state, bytes) do
+  defp handle_set(_state, bytes) do
     value = Exdis.IoData.new(bytes)
+    reply_value = {:simple_string, "OK"}
     state = string(repr: :iodata, value: value)
-    {:ok_and_update, state}
+    {:ok, reply_value, state}
   end
 
   ## ------------------------------------------------------------------
   ## STRLEN Command
   ## ------------------------------------------------------------------
 
-  def str_length(locks, key) do
-    {pid, lock_ref} = locks[key]
-    Exdis.Database.KeyOwner.manipulate_value(pid, lock_ref, &handle_str_length/1)
+  def str_length(key_owner) do
+    Exdis.Database.KeyOwner.read(key_owner, &handle_str_length/1)
   end
 
-  def handle_str_length(string(repr: repr, value: value)) do
+  defp handle_str_length(string(repr: repr, value: value)) do
     case repr do
       :iodata ->
         value_string_length = Exdis.IoData.size(value)
-        reply = {:integer, value_string_length}
-        {:ok, reply}
+        reply_value = {:integer, value_string_length}
+        {:ok, reply_value}
       :int64 ->
         value_string_length = Exdis.Int64.decimal_string_length(value)
-        reply = {:integer, value_string_length}
-        {:ok, reply}
+        reply_value = {:integer, value_string_length}
+        {:ok, reply_value}
       :float ->
         value_string_length = Exdis.Float.decimal_string_length(value)
-        reply = {:integer, value_string_length}
-        {:ok, reply}
+        reply_value = {:integer, value_string_length}
+        {:ok, reply_value}
     end
   end
 
-  def handle_str_length(nil) do
-    reply = {:integer, 0}
-    {:ok, reply}
+  defp handle_str_length(nil) do
+    reply_value = {:integer, 0}
+    {:ok, reply_value}
   end
 
-  def handle_str_length(_state) do
+  defp handle_str_length(_state) do
     {:error, :key_of_wrong_type}
+  end
+
+  ## ------------------------------------------------------------------
+  ## Value Streams
+  ## ------------------------------------------------------------------
+
+  def maybe_string_stream(string(repr: :iodata, value: value)) do
+    size = Exdis.IoData.size(value)
+    fragments = Exdis.IoData.fragments(value)
+
+    case size <= @streamable_value_threshold or fragments < 2 do
+      true ->
+        bytes = Exdis.IoData.bytes(value)
+        {:string, bytes}
+      false ->
+        bytes = Exdis.IoData.bytes(value)
+        {:stream, Exdis.Database.Value.Stream.new(&start_consuming_string_stream(&1, size, bytes))}
+    end
+  end
+
+  def maybe_string_stream(string(repr: :int64, value: value)) do
+    value_string = Exdis.Int64.to_decimal_string(value)
+    {:string, value_string}
+  end
+
+  def maybe_string_stream(string(repr: :float, value: value)) do
+    value_string = Exdis.Float.to_decimal_string(value)
+    {:string, value_string}
+  end
+
+  defp start_consuming_string_stream(nil, size, bytes) do
+    case take_first_chunk_from_bytes(bytes) do
+      {chunk, [_|_] = remaining} ->
+        part = {:partial, {:string_start, size, chunk}}
+        continuation_callback = &continue_consuming_string_stream(&1, remaining)
+        {:more, part, continuation_callback}
+      {chunk, [] = _remaining} ->
+        part = {:string, chunk}
+        {:finished, part}
+    end
+  end
+
+  defp continue_consuming_string_stream(nil, bytes) do
+    case take_first_chunk_from_bytes(bytes) do
+      {chunk, [_|_] = remaining} ->
+        part = {:partial, {:string_continue, chunk}}
+        continuation_callback = &continue_consuming_string_stream(&1, remaining)
+        {:more, part, continuation_callback}
+      {chunk, [] = _remaining} ->
+        part = {:partial, {:string_finish, chunk}}
+        {:finished, part}
+    end
+  end
+
+  defp take_first_chunk_from_bytes([head|next]) do
+    case take_first_chunk_from_bytes(head) do
+      {chunk, [_,_|_] = head_remaining} ->
+        {chunk, [head_remaining | next]}
+      {chunk, [head_remaining]} ->
+        {chunk, [head_remaining | next]}
+      {chunk, []} ->
+        {chunk, next}
+    end
+  end
+
+  defp take_first_chunk_from_bytes([]) do
+    {"", []}
+  end
+
+  defp take_first_chunk_from_bytes(<<binary :: bytes>>) do
+    {binary, []}
   end
 
   ## ------------------------------------------------------------------

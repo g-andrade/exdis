@@ -28,8 +28,8 @@ defmodule Exdis.ConnectionWriter do
     :proc_lib.start_link(__MODULE__, :init, init_args)
   end
 
-  def dispatch(pid, type, args) do
-    send(pid, {:write, type, args})
+  def dispatch(pid, arg) do
+    send(pid, {:write, arg})
   end
 
   ## ------------------------------------------------------------------
@@ -56,25 +56,25 @@ defmodule Exdis.ConnectionWriter do
     receive do
       msg ->
         #Logger.info("Writer got message")
-        handle_msg(msg, state)
+        handle_msg(state, msg)
     end
   end
 
-  defp handle_msg({:write, type, args}, state) do
-    handle_write(type, args, state)
+  defp handle_msg(state, {:write, arg}) do
+    handle_write(state, arg)
   end
 
-  defp handle_msg({:"EXIT", pid, _}, state(conn_pid: pid)) do
+  defp handle_msg(state(conn_pid: pid), {:"EXIT", pid, _}) do
     exit(:normal)
   end
 
-  def handle_write(:direct, value, state) do
-    _ = perform_direct_write(value, state)
+  defp handle_write(state, {:stream, key_owner_pid, stream_ref}) do
+    _ = perform_streamed_write(state, key_owner_pid, stream_ref)
     loop(state)
   end
 
-  def handle_write(:future, {key_owner_pid, future_ref}, state) do
-    _ = perform_future_write(key_owner_pid, future_ref, state)
+  defp handle_write(state, resp_value) do
+    _ = perform_direct_write(state, resp_value)
     loop(state)
   end
 
@@ -82,23 +82,22 @@ defmodule Exdis.ConnectionWriter do
   ## Private Function Definitions - Direct Write
   ## ------------------------------------------------------------------
 
-  def perform_direct_write(value, state) do
-    #Logger.info("Direct write started")
+  def perform_direct_write(state, value) do
     state(transport: transport, socket: socket) = state
-    data = 
-      case value do 
-        :ok -> 
+    data =
+      case value do
+        :ok ->
           Exdis.RESP.Value.encode({:simple_string, "OK"})
-        :queued -> 
+        :queued ->
           Exdis.RESP.Value.encode({:simple_string, "QUEUED"})
-        {:error, reason} -> 
+        {:error, reason} ->
           reason_iodata = error_reason_to_iodata(reason)
           Exdis.RESP.Value.encode({:error, reason_iodata})
         other ->
           Exdis.RESP.Value.encode(other)
       end
+    Logger.info("Writing #{inspect data}")
     transport.send(socket, data)
-    #Logger.info("Direct write finished")
   end
 
   defp error_reason_to_iodata(reason) do
@@ -130,22 +129,19 @@ defmodule Exdis.ConnectionWriter do
   ## Private Function Definitions - Future Write
   ## ------------------------------------------------------------------
 
-  def perform_future_write(key_owner_pid, future_ref, state) do
-    #Logger.info("Future write started")
+  def perform_streamed_write(state, key_owner_pid, stream_ref) do
     key_owner_mon = Process.monitor(key_owner_pid)
-    perform_future_write_recur(key_owner_pid, key_owner_mon, future_ref, state)
+    perform_future_write_recur(state, key_owner_pid, key_owner_mon, stream_ref)
   end
 
-  def perform_future_write_recur(key_owner_pid, key_owner_mon, future_ref, state) do
-    state(transport: transport, socket: socket) = state
-
-    case Exdis.Database.KeyOwner.consume_future(key_owner_pid, key_owner_mon, future_ref) do
-      {:more, _part} ->
-        exit(:todo)
-      {:finished, resp_value} ->
-        data = Exdis.RESP.Value.encode(resp_value)
-        _ = transport.send(socket, data)
-        #Logger.info("Future write finished")
+  def perform_future_write_recur(state, key_owner_pid, key_owner_mon, stream_ref) do
+    case Exdis.Database.KeyOwner.consume_value_stream(key_owner_pid, key_owner_mon, stream_ref) do
+      {:more, value} ->
+        perform_direct_write(state, value)
+        perform_future_write_recur(state, key_owner_pid, key_owner_mon, stream_ref)
+      {:finished, value} ->
+        perform_direct_write(state, value)
+        Process.demonitor(key_owner_mon, [:flush])
     end
   end
 end

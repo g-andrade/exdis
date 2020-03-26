@@ -8,7 +8,7 @@ defmodule Exdis.Application do
   def start(_type, _args) do
     # List all child processes to be supervised
     children = [
-      Exdis.DatabaseRegistry,
+      Exdis.Database,
       Exdis.Listener
       # Starts a worker by calling: Exdis.Worker.start_link(arg)
       # {Exdis.Worker, arg},

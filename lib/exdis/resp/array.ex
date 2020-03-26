@@ -6,7 +6,7 @@ defmodule Exdis.RESP.Array do
   def recv(fun) do
     case Exdis.RESP.Integer.recv(fun) do
       count when count >= 0 ->
-        recv_elements(count, fun, [])
+        recv_members(count, fun, [])
       0 ->
         nil
     end
@@ -14,9 +14,7 @@ defmodule Exdis.RESP.Array do
 
   def encode(list) when is_list(list) do
     size = length(list)
-    encoded_size = Exdis.RESP.Integer.encode(size)
-    encoded_elements = Enum.map(list, &Exdis.RESP.Value.encode/1)
-    [encoded_size | encoded_elements]
+    [encode_start(size, list), encode_finish([])]
   end
 
   def encode(nil) do
@@ -25,16 +23,30 @@ defmodule Exdis.RESP.Array do
     encoded_size
   end
 
+  def encode_start(size, members) do
+    encoded_size = Exdis.RESP.Integer.encode(size)
+    encoded_members = Enum.map(members, &Exdis.RESP.Value.encode/1)
+    [encoded_size, encoded_members]
+  end
+
+  def encode_more(members) do
+    Enum.map(members, &Exdis.RESP.Value.encode/1)
+  end
+
+  def encode_finish(members) do
+    Enum.map(members, &Exdis.RESP.Value.encode/1)
+  end
+
   ## ------------------------------------------------------------------
   ## Private Function Definitions
   ## ------------------------------------------------------------------
 
-  defp recv_elements(count, fun, acc) do
+  defp recv_members(count, fun, acc) do
     cond do
       count > 0 ->
         value = Exdis.RESP.Value.recv(fun)
         acc = [value | acc]
-        recv_elements(count - 1, fun, acc)
+        recv_members(count - 1, fun, acc)
       count === 0 ->
         Enum.reverse(acc)
     end
