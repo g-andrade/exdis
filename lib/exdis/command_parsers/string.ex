@@ -172,7 +172,7 @@ defmodule Exdis.CommandParsers.String do
 
   defp mget_recur([], key_names_acc) do
     key_names = Enum.reverse(key_names_acc)
-    {:ok, key_names, &Exdis.Database.Value.String.mget(&1), [:use_varargs]}
+    {:ok, key_names, &Exdis.Database.Value.String.mget(&1), [:varargs]}
   end
 
   defp mget_recur([_|_], _) do
@@ -203,7 +203,7 @@ defmodule Exdis.CommandParsers.String do
 
   defp mset_recur([], pairs_acc) do
     {key_names, values} = Enum.unzip(pairs_acc)
-    {:ok, key_names, &Exdis.Database.Value.String.mset(&1, values), [:use_varargs]}
+    {:ok, key_names, &Exdis.Database.Value.String.mset(&1, values), [:varargs]}
   end
 
   defp mset_recur([_|_], _) do

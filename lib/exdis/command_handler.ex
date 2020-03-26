@@ -177,7 +177,7 @@ defmodule Exdis.CommandHandler do
   end
 
   defp apply_command_handler_args(handler_fun, handler_args, opts) do
-    case :use_varargs in opts do
+    case :varargs in opts do
       false -> apply(handler_fun, handler_args)
       true -> handler_fun.(handler_args)
     end
