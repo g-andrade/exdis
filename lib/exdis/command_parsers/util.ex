@@ -100,7 +100,7 @@ defmodule Exdis.CommandParsers.Util do
         {:error, :empty_list}
       :unique in opts ->
         pairs = Enum.zip(key_names_acc, values_acc)
-        unique_pairs = :lists.keysort(1, pairs)
+        unique_pairs = :lists.ukeysort(1, pairs)
         {keys, values} = Enum.unzip(unique_pairs)
         {:ok, keys, values}
       :unstable in opts ->
