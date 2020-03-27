@@ -16,6 +16,35 @@ defmodule Exdis.CommandParsers.String do
   end
 
   ## ------------------------------------------------------------------
+  ## BITCOUNT command
+  ## ------------------------------------------------------------------
+
+  def bit_count([{:string, key_name}]) do
+    {:ok, [key_name], &Exdis.Database.Value.String.bit_count(&1, 0, -1)}
+  end
+
+  def bit_count([{:string, key_name}, resp_start, resp_finish]) do
+    case {Exdis.CommandParsers.Util.maybe_coerce_into_int64(resp_start),
+          Exdis.CommandParsers.Util.maybe_coerce_into_int64(resp_finish)}
+    do
+      {{:ok, start}, {:ok, finish}} ->
+        {:ok, [key_name], &Exdis.Database.Value.String.bit_count(&1, start, finish)}
+      {{:error, _}, _} ->
+        {:error, {:not_an_integer_or_out_of_range, :start}}
+      {_, {:error, _}} ->
+        {:error, {:not_an_integer_or_out_of_range, :end}}
+    end
+  end
+
+  def bit_count(args) when length(args) in [1, 3] do
+    {:error, :bad_syntax}
+  end
+
+  def bit_count(_) do
+    {:error, {:wrong_number_of_arguments, :"BITCOUNT"}}
+  end
+
+  ## ------------------------------------------------------------------
   ## DECR Command
   ## ------------------------------------------------------------------
 

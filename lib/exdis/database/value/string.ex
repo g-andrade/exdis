@@ -55,6 +55,31 @@ defmodule Exdis.Database.Value.String do
   end
 
   ## ------------------------------------------------------------------
+  ## BITCOUNT Command
+  ## ------------------------------------------------------------------
+
+  def bit_count(key_owner, start, finish) do
+    Exdis.Database.KeyOwner.read(key_owner, &handle_bit_count(&1, start, finish))
+  end
+
+  defp handle_bit_count(string() = state, start, finish) do
+    state = coerce_into_iodata(state)
+    string(value: value) = state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
+    bit_count = Exdis.IoData.bit_count(value, start, finish)
+    reply_value = {:integer, bit_count}
+    {:ok, reply_value, state}
+  end
+
+  defp handle_bit_count(nil, _start, _finish) do
+    reply_value = {:integer, 0}
+    {:ok, reply_value}
+  end
+
+  defp handle_bit_count(_state, _start, _finish) do
+    {:error, :key_of_wrong_type}
+  end
+
+  ## ------------------------------------------------------------------
   ## GET Command
   ## ------------------------------------------------------------------
 

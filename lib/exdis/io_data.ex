@@ -29,6 +29,11 @@ defmodule Exdis.IoData do
       fragments: fragments + tail_fragments)
   end
 
+  def bit_count(io_data, start, finish) do
+    range_bytes = get_range(io_data, start, finish)
+    bit_count_recur(range_bytes, 0)
+  end
+
   def bytes(io_data(bytes: bytes)), do: bytes
 
   def flatten(io_data(bytes: bytes, size: size) = io_data) do
@@ -54,15 +59,11 @@ defmodule Exdis.IoData do
   end
 
   def get_range(io_data(bytes: bytes, size: size), start, finish) do
-    start = max(0, normalize_byte_offset(start, size))
-    finish = min(size - 1, normalize_byte_offset(finish, size))
-
-    case start >= 0 and start < size and start <= finish do
-      true  ->
-        length = finish - start + 1
+    case normalize_byte_range(size, start, finish) do
+      {:valid, start, length} ->
         {_, 0, range_bytes} = get_range_recur(bytes, start, length, [])
         range_bytes
-      false ->
+      :invalid ->
         ""
     end
   end
@@ -102,6 +103,25 @@ defmodule Exdis.IoData do
   when is_integer(byte) and byte >= 0 and byte < 256
   do
     {size_acc + 1, fragments_acc + 1}
+  end
+
+  ## ------------------------------------------------------------------
+  ## Private Functions: bit_count_recur
+  ## ------------------------------------------------------------------
+
+  defp bit_count_recur(<<binary :: bytes>>, acc) do
+    acc + Exdis.Bitstring.bit_count(binary)
+  end
+
+  defp bit_count_recur([head|tail], acc) do
+    acc = bit_count_recur(head, acc)
+    bit_count_recur(tail, acc)
+  end
+
+  defp bit_count_recur([], acc), do: acc
+
+  defp bit_count_recur(byte, acc) when is_integer(byte) do
+    acc + Exdis.Byte.bit_count(byte)
   end
 
   ## ------------------------------------------------------------------
@@ -183,9 +203,22 @@ defmodule Exdis.IoData do
   end
 
   ## ------------------------------------------------------------------
-  ## Private Functions: normalize_byte_offset
+  ## Private Functions: Normalization of Offsets
   ## ------------------------------------------------------------------
 
-  defp normalize_byte_offset(offset, _size) when offset >= 0, do: offset
-  defp normalize_byte_offset(offset, size), do: size + offset
+  defp normalize_byte_range(size, start, finish) do
+    start = max(0, normalize_byte_offset(size, start))
+    finish = min(size - 1, normalize_byte_offset(size, finish))
+
+    case start >= 0 and start < size and start <= finish do
+      true ->
+        length = finish - start + 1
+        {:valid, start, length}
+      false ->
+        :invalid
+    end
+  end
+
+  defp normalize_byte_offset(_size, offset) when offset >= 0, do: offset
+  defp normalize_byte_offset(size, offset), do: size + offset
 end
