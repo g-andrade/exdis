@@ -43,6 +43,7 @@ defmodule Exdis.Command do
       # Strings
       "APPEND" => &Exdis.CommandParsers.String.append/1,
       "BITCOUNT" => &Exdis.CommandParsers.String.bit_count/1,
+      "BITPOS" => &Exdis.CommandParsers.String.bit_position/1,
       "DECR" => &Exdis.CommandParsers.String.decrement/1,
       "DECRBY" => &Exdis.CommandParsers.String.decrement_by/1,
       "GET" => &Exdis.CommandParsers.String.get/1,

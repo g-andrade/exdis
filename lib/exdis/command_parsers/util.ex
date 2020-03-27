@@ -16,7 +16,7 @@ defmodule Exdis.CommandParsers.Util do
   end
 
   ## ------------------------------------------------------------------
-  ## RESP Type Coercion - To Integer
+  ## RESP Type Coercion - To Int64
   ## ------------------------------------------------------------------
 
   def maybe_coerce_into_int64({:integer, integer}) do
@@ -44,6 +44,32 @@ defmodule Exdis.CommandParsers.Util do
   end
 
   def maybe_coerce_into_float(_) do
+    {:error, :unsupported_conversion}
+  end
+
+  ## ------------------------------------------------------------------
+  ## RESP Type Coercion - To Bit
+  ## ------------------------------------------------------------------
+
+  def maybe_coerce_into_bit({:integer, integer}) do
+    case integer in [0, 1] do
+      true ->
+        {:ok, integer}
+      false ->
+        {:error, {:integer_value_not_in_range, integer}}
+    end
+  end
+
+  def maybe_coerce_into_bit({:string, string}) do
+    case Exdis.Int64.from_decimal_string(string) do
+      {:ok, integer} ->
+        maybe_coerce_into_bit({:integer, integer})
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def maybe_coerce_into_bit(_) do
     {:error, :unsupported_conversion}
   end
 

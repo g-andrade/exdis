@@ -34,6 +34,18 @@ defmodule Exdis.IoData do
     bit_count_recur(range_bytes, 0)
   end
 
+  def bit_position(io_data, bit, start, finish) do
+    io_data(bytes: bytes, size: size) = io_data
+
+    case normalize_byte_range(size, start, finish) do
+      {:valid, start, length} ->
+        {_, 0, range_bytes} = get_range_recur(bytes, start, length, [])
+        bit_position_recur(range_bytes, bit, start * 8)
+      :invalid ->
+        {:skipped, size(io_data)}
+    end
+  end
+
   def bytes(io_data(bytes: bytes)), do: bytes
 
   def flatten(io_data(bytes: bytes, size: size) = io_data) do
@@ -105,7 +117,7 @@ defmodule Exdis.IoData do
     {size_acc + 1, fragments_acc + 1}
   end
 
-  ## ------------------------------------------------------------------
+  ## -----------------------------------------------------------------
   ## Private Functions: bit_count_recur
   ## ------------------------------------------------------------------
 
@@ -122,6 +134,41 @@ defmodule Exdis.IoData do
 
   defp bit_count_recur(byte, acc) when is_integer(byte) do
     acc + Exdis.Byte.bit_count(byte)
+  end
+
+  ## -----------------------------------------------------------------
+  ## Private Functions: bit0_position_recur
+  ## ------------------------------------------------------------------
+
+  defp bit_position_recur(<<binary :: bytes>>, bit, acc) do
+    case Exdis.Bitstring.bit_position(binary, bit) do
+      :skipped ->
+        {:skipped, bit_size(binary)}
+      {:found, offset} ->
+        {:found, acc + offset}
+    end
+  end
+
+  defp bit_position_recur([head|tail], bit, acc) do
+    case bit_position_recur(head, bit, acc) do
+      {:skipped, acc} ->
+        bit_position_recur(tail, bit, acc)
+      {:found, _} = found ->
+        found
+    end
+  end
+
+  defp bit_position_recur([], _bit, acc) do
+    {:skipped, acc}
+  end
+
+  defp bit_position_recur(byte, bit, acc) when is_integer(byte) do
+    case Exdis.Byte.bit_position(byte, bit) do
+      {:found, offset} ->
+        {:found, acc + offset}
+      :skipped ->
+        {:skipped, acc + 8}
+    end
   end
 
   ## ------------------------------------------------------------------
@@ -205,6 +252,10 @@ defmodule Exdis.IoData do
   ## ------------------------------------------------------------------
   ## Private Functions: Normalization of Offsets
   ## ------------------------------------------------------------------
+
+  defp normalize_byte_range(size, start, finish) when finish === nil do
+    normalize_byte_range(size, start, -1)
+  end
 
   defp normalize_byte_range(size, start, finish) do
     start = max(0, normalize_byte_offset(size, start))

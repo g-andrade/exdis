@@ -80,6 +80,45 @@ defmodule Exdis.Database.Value.String do
   end
 
   ## ------------------------------------------------------------------
+  ## BITPOS Command
+  ## ------------------------------------------------------------------
+
+  def bit_position(key_owner, bit, start \\ 0, finish \\ nil) do
+    Exdis.Database.KeyOwner.read(key_owner, &handle_bit_position(&1, bit, start, finish))
+  end
+
+  defp handle_bit_position(string() = state, bit, start, finish) do
+    state = coerce_into_iodata(state)
+    string(value: value) = state = maybe_flatten_iodata(state, @max_iodata_fragments_upon_read)
+    _value_size = Exdis.IoData.size(value)
+
+    case Exdis.IoData.bit_position(value, bit, start, finish) do
+      {:found, offset} ->
+        reply_value = {:integer, offset}
+        {:ok, reply_value, state}
+      {:skipped, _} when bit === 1 or finish !== nil ->
+        reply_value = {:integer, -1}
+        {:ok, reply_value, state}
+      {:skipped, offset} ->
+        reply_value = {:integer, offset}
+        {:ok, reply_value, state}
+    end
+  end
+
+  defp handle_bit_position(nil, bit, _start, _finish) do
+    case bit do
+      0 ->
+        {:ok, {:integer, 0}}
+      1 ->
+        {:ok, {:integer, -1}}
+    end
+  end
+
+  defp handle_bit_position(_state, _bit, _start, _finish) do
+    {:error, :key_of_wrong_type}
+  end
+
+  ## ------------------------------------------------------------------
   ## GET Command
   ## ------------------------------------------------------------------
 

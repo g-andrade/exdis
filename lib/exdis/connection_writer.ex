@@ -118,6 +118,8 @@ defmodule Exdis.ConnectionWriter do
         "ERR increment would produce NaN or Infinity"
       :key_of_wrong_type ->
         "WRONGTYPE Operation against a key holding the wrong kind of value"
+      {:not_a_bit, argument_name} ->
+        "ERR The #{argument_name} argument must be 1 or 0"
       {:not_a_valid_float, argument_name} ->
         "ERR #{argument_name} is not a valid float"
       {:not_an_integer_or_out_of_range, argument_name} ->

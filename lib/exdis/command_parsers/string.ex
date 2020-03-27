@@ -45,6 +45,56 @@ defmodule Exdis.CommandParsers.String do
   end
 
   ## ------------------------------------------------------------------
+  ## BITPOS command
+  ## ------------------------------------------------------------------
+
+  def bit_position([{:string, key_name}, resp_bit]) do
+    case Exdis.CommandParsers.Util.maybe_coerce_into_bit(resp_bit) do
+      {:ok, bit} ->
+        {:ok, [key_name], &Exdis.Database.Value.String.bit_position(&1, bit)}
+      {:error, _} ->
+        {:error, {:not_a_bit, :bit}}
+    end
+  end
+
+  def bit_position([{:string, key_name}, resp_bit, resp_start]) do
+    case {Exdis.CommandParsers.Util.maybe_coerce_into_bit(resp_bit),
+          Exdis.CommandParsers.Util.maybe_coerce_into_int64(resp_start)}
+    do
+      {{:ok, bit}, {:ok, start}} ->
+        {:ok, [key_name], &Exdis.Database.Value.String.bit_position(&1, bit, start)}
+      {{:error, _}, _} ->
+        {:error, {:not_a_bit, :bit}}
+      {_, {:error, _}} ->
+        {:error, {:not_an_integer_or_out_of_range, :start}}
+    end
+  end
+
+  def bit_position([{:string, key_name}, resp_bit, resp_start, resp_finish]) do
+    case {Exdis.CommandParsers.Util.maybe_coerce_into_bit(resp_bit),
+          Exdis.CommandParsers.Util.maybe_coerce_into_int64(resp_start),
+          Exdis.CommandParsers.Util.maybe_coerce_into_int64(resp_finish)}
+    do
+      {{:ok, bit}, {:ok, start}, {:ok, finish}} ->
+        {:ok, [key_name], &Exdis.Database.Value.String.bit_position(&1, bit, start, finish)}
+      {{:error, _}, _, _} ->
+        {:error, {:not_a_bit, :bit}}
+      {_, {:error, _}, _} ->
+        {:error, {:not_an_integer_or_out_of_range, :start}}
+      {_, _, {:error, _}} ->
+        {:error, {:not_an_integer_or_out_of_range, :end}}
+    end
+  end
+
+  def bit_position(args) when length(args) in [2, 3, 4] do
+    {:error, :bad_syntax}
+  end
+
+  def bit_position(_) do
+    {:error, {:wrong_number_of_arguments, :"BITPOS"}}
+  end
+
+  ## ------------------------------------------------------------------
   ## DECR Command
   ## ------------------------------------------------------------------
 
