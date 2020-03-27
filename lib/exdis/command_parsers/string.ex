@@ -7,8 +7,12 @@ defmodule Exdis.CommandParsers.String do
     {:ok, [key_name], &Exdis.Database.Value.String.append(&1, tail)}
   end
 
-  def append(_) do
+  def append([_, _]) do
     {:error, :bad_syntax}
+  end
+
+  def append(_) do
+    {:error, {:wrong_number_of_arguments, :"APPEND"}}
   end
 
   ## ------------------------------------------------------------------
@@ -19,8 +23,12 @@ defmodule Exdis.CommandParsers.String do
     {:ok, [key_name], &Exdis.Database.Value.String.increment_by(&1, -1)}
   end
 
-  def decrement(_) do
+  def decrement([_]) do
     {:error, :bad_syntax}
+  end
+
+  def decrement(_) do
+    {:error, {:wrong_number_of_arguments, :"DECR"}}
   end
 
   ## ------------------------------------------------------------------
@@ -32,12 +40,16 @@ defmodule Exdis.CommandParsers.String do
       {:ok, decrement} ->
         {:ok, [key_name], &Exdis.Database.Value.String.increment_by(&1, -decrement)}
       {:error, _} ->
-        {:error, {:not_an_integer_or_out_of_range, "decrement"}}
+        {:error, {:not_an_integer_or_out_of_range, :decrement}}
     end
   end
 
-  def decrement_by(_) do
+  def decrement_by([_, _]) do
     {:error, :bad_syntax}
+  end
+
+  def decrement_by(_) do
+    {:error, {:wrong_number_of_arguments, :"DECRBY"}}
   end
 
   ## ------------------------------------------------------------------
@@ -48,8 +60,12 @@ defmodule Exdis.CommandParsers.String do
     {:ok, [key_name], &Exdis.Database.Value.String.get(&1)}
   end
 
-  def get(_) do
+  def get([_]) do
     {:error, :bad_syntax}
+  end
+
+  def get(_) do
+    {:error, {:wrong_number_of_arguments, :"GET"}}
   end
 
   ## ------------------------------------------------------------------
@@ -61,12 +77,16 @@ defmodule Exdis.CommandParsers.String do
       {:ok, offset} when offset >= 0 ->
         {:ok, [key_name], &Exdis.Database.Value.String.get_bit(&1, offset)}
       _ ->
-        {:error, {:not_an_integer_or_out_of_range, "bit offset"}}
+        {:error, {:not_an_integer_or_out_of_range, :"bit offset"}}
     end
   end
 
-  def get_bit(_) do
+  def get_bit([_, _]) do
     {:error, :bad_syntax}
+  end
+
+  def get_bit(_) do
+    {:error, {:wrong_number_of_arguments, :"GETBIT"}}
   end
 
   ## ------------------------------------------------------------------
@@ -80,14 +100,18 @@ defmodule Exdis.CommandParsers.String do
       {{:ok, start}, {:ok, finish}} ->
         {:ok, [key_name], &Exdis.Database.Value.String.get_range(&1, start, finish)}
       {{:error, _}, _} ->
-        {:error, {:not_an_integer_or_out_of_range, "start"}}
+        {:error, {:not_an_integer_or_out_of_range, :start}}
       {_, {:error, _}} ->
-        {:error, {:not_an_integer_or_out_of_range, "end"}}
+        {:error, {:not_an_integer_or_out_of_range, :end}}
     end
   end
 
+  def get_range([_, _, _]) do
+    {:error , :bad_syntax}
+  end
+
   def get_range(_) do
-    {:error, :bad_syntax}
+    {:error, {:wrong_number_of_arguments, :"GETRANGE"}}
   end
 
   ## ------------------------------------------------------------------
@@ -103,8 +127,12 @@ defmodule Exdis.CommandParsers.String do
     end
   end
 
-  def get_set(_) do
+  def get_set([_, _]) do
     {:error, :bad_syntax}
+  end
+
+  def get_set(_) do
+    {:error, {:wrong_number_of_arguments, :"GETSET"}}
   end
 
   ## ------------------------------------------------------------------
@@ -115,8 +143,12 @@ defmodule Exdis.CommandParsers.String do
     {:ok, [key_name], &Exdis.Database.Value.String.increment_by(&1, +1)}
   end
 
-  def increment(_) do
+  def increment([_]) do
     {:error, :bad_syntax}
+  end
+
+  def increment(_) do
+    {:error, {:wrong_number_of_arguments, :"INCR"}}
   end
 
   ## ------------------------------------------------------------------
@@ -128,12 +160,16 @@ defmodule Exdis.CommandParsers.String do
       {:ok, increment} ->
         {:ok, [key_name], &Exdis.Database.Value.String.increment_by(&1, +increment)}
       {:error, _} ->
-        {:error, {:not_an_integer_or_out_of_range, "increment"}}
+        {:error, {:not_an_integer_or_out_of_range, :increment}}
     end
   end
 
-  def increment_by(_) do
+  def increment_by([_, _]) do
     {:error, :bad_syntax}
+  end
+
+  def increment_by(_) do
+    {:error, {:wrong_number_of_arguments, :"INCRBY"}}
   end
 
   ## ------------------------------------------------------------------
@@ -145,12 +181,16 @@ defmodule Exdis.CommandParsers.String do
       {:ok, increment} ->
         {:ok, [key_name], &Exdis.Database.Value.String.increment_by_float(&1, +increment)}
       {:error, _} ->
-        {:error, {:not_a_valid_float, "increment"}}
+        {:error, {:not_a_valid_float, :increment}}
     end
   end
 
-  def increment_by_float(_) do
+  def increment_by_float([_, _]) do
     {:error, :bad_syntax}
+  end
+
+  def increment_by_float(_) do
+    {:error, {:wrong_number_of_arguments, :"INCRBY"}}
   end
 
   ## ------------------------------------------------------------------
@@ -161,6 +201,8 @@ defmodule Exdis.CommandParsers.String do
     case Exdis.CommandParsers.Util.parse_string_list(args, [:non_empty]) do
       {:ok, key_names} ->
         {:ok, key_names, &Exdis.Database.Value.String.mget(&1), [:varargs]}
+      {:error, :empty_list} ->
+        {:error, {:wrong_number_of_arguments, :"MGET"}}
       {:error, _} ->
         {:error, :bad_syntax}
     end
@@ -174,6 +216,10 @@ defmodule Exdis.CommandParsers.String do
     case Exdis.CommandParsers.Util.parse_and_unzip_kvlist(args, [:non_empty, :unique]) do
       {:ok, key_names, values} ->
         {:ok, key_names, &Exdis.Database.Value.String.mset(&1, values), [:varargs]}
+      {:error, :empty_list} ->
+        {:error, {:wrong_number_of_arguments, :"MSET"}}
+      {:error, {:unpaired_entry, _}} ->
+        {:error, {:wrong_number_of_arguments, :"MSET"}}
       {:error, _} ->
         {:error, :bad_syntax}
     end
@@ -192,8 +238,12 @@ defmodule Exdis.CommandParsers.String do
     end
   end
 
-  def set(_) do
+  def set([_, _]) do
     {:error, :bad_syntax}
+  end
+
+  def set(_) do
+    {:error, {:wrong_number_of_arguments, :"SET"}}
   end
 
   ## ------------------------------------------------------------------
@@ -204,7 +254,11 @@ defmodule Exdis.CommandParsers.String do
     {:ok, [key_name], &Exdis.Database.Value.String.str_length(&1)}
   end
 
-  def str_length(_) do
+  def str_length([_]) do
     {:error, :bad_syntax}
+  end
+
+  def str_length(_) do
+    {:error, {:wrong_number_of_arguments, :"STRLEN"}}
   end
 end

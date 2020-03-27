@@ -79,7 +79,7 @@ defmodule Exdis.CommandHandler do
         dispatch_reply(state, :ok)
         state(state, transaction: transaction(database_index: database_index))
       transaction() ->
-        dispatch_reply(state, {:error, {:calls_cannot_be_nested, "MULTI"}})
+        dispatch_reply(state, {:error, {:calls_cannot_be_nested, :"MULTI"}})
         state
     end
   end
@@ -93,7 +93,7 @@ defmodule Exdis.CommandHandler do
         dispatch_reply(state, {:error, :transaction_discarded_because_of_previous_errors})
         state(state, transaction: nil)
       nil ->
-        dispatch_reply(state, {:error, {:command_without_another_first, "EXEC", "MULTI"}})
+        dispatch_reply(state, {:error, {:command_without_another_first, :"EXEC", :"MULTI"}})
         state
     end
   end
@@ -105,7 +105,7 @@ defmodule Exdis.CommandHandler do
         dispatch_reply(state, :ok)
         state(state, transaction: nil)
       nil ->
-        dispatch_reply(state, {:error, {:command_without_another_first, "DISCARD", "MULTI"}})
+        dispatch_reply(state, {:error, {:command_without_another_first, :"DISCARD", :"MULTI"}})
         state
     end
   end

@@ -8,7 +8,7 @@ defmodule Exdis.CommandParsers.Transaction do
   end
 
   def discard(_) do
-    {:error, :bad_syntax}
+    {:error, {:wrong_number_of_arguments, :"DISCARD"}}
   end
 
   ## ------------------------------------------------------------------
@@ -20,7 +20,7 @@ defmodule Exdis.CommandParsers.Transaction do
   end
 
   def exec(_) do
-    {:error, :bad_syntax}
+    {:error, {:wrong_number_of_arguments, :"EXEC"}}
   end
 
   ## ------------------------------------------------------------------
@@ -32,6 +32,6 @@ defmodule Exdis.CommandParsers.Transaction do
   end
 
   def multi(_) do
-    {:error, :bad_syntax}
+    {:error, {:wrong_number_of_arguments, :"MULTI"}}
   end
 end

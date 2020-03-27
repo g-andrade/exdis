@@ -7,6 +7,8 @@ defmodule Exdis.CommandParsers.Key do
     case Exdis.CommandParsers.Util.parse_string_list(args, [:non_empty, :unique]) do
       {:ok, key_names} ->
         {:ok, key_names, &Exdis.Database.Key.delete(&1), [:varargs]}
+      {:error, :empty_list} ->
+        {:error, {:wrong_number_of_arguments, :"DEL"}}
       {:error, _} ->
         {:error, :bad_syntax}
     end
@@ -20,6 +22,8 @@ defmodule Exdis.CommandParsers.Key do
     case Exdis.CommandParsers.Util.parse_string_list(args, [:non_empty, :unstable]) do
       {:ok, key_names} ->
         {:ok, key_names, &Exdis.Database.Key.exist?(&1), [:varargs]}
+      {:error, :empty_list} ->
+        {:error, {:wrong_number_of_arguments, :"EXISTS"}}
       {:error, _} ->
         {:error, :bad_syntax}
     end

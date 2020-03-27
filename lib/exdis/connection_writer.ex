@@ -108,24 +108,26 @@ defmodule Exdis.ConnectionWriter do
     case reason do
       :bad_syntax ->
         "ERR syntax error"
-      {:unknown_command, command_name} ->
-        "ERR unknown command '#{command_name}'"
-      :key_of_wrong_type ->
-        "WRONGTYPE Operation against a key holding the wrong kind of value"
-      {:not_an_integer_or_out_of_range, argument_name} ->
-        "ERR #{argument_name} is not an integer or out of range"
-      :increment_or_decrement_would_overflow ->
-        "ERR increment or decrement would overflow"
-      {:not_a_valid_float, argument_name} ->
-        "ERR #{argument_name} is not a valid float"
-      :increment_would_produce_NaN_or_infinity ->
-        "ERR increment would produce NaN or Infinity"
       {:calls_cannot_be_nested, command_name} ->
         "ERR #{command_name} calls can not be nested"
       {:command_without_another_first, dependent_name, dependency_name} ->
         "ERR #{dependent_name} without #{dependency_name}"
+      :increment_or_decrement_would_overflow ->
+        "ERR increment or decrement would overflow"
+      :increment_would_produce_NaN_or_infinity ->
+        "ERR increment would produce NaN or Infinity"
+      :key_of_wrong_type ->
+        "WRONGTYPE Operation against a key holding the wrong kind of value"
+      {:not_a_valid_float, argument_name} ->
+        "ERR #{argument_name} is not a valid float"
+      {:not_an_integer_or_out_of_range, argument_name} ->
+        "ERR #{argument_name} is not an integer or out of range"
       :transaction_discarded_because_of_previous_errors ->
         "EXECABORT Transaction discarded because of previous errors"
+      {:unknown_command, command_name} ->
+        "ERR unknown command '#{command_name}'"
+      {:wrong_number_of_arguments, command} ->
+        "ERR wrong number of arguments for #{command} command"
     end
   end
 
