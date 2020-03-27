@@ -157,57 +157,26 @@ defmodule Exdis.CommandParsers.String do
   ## MGET Command
   ## ------------------------------------------------------------------
 
-  def mget([_|_] = args) do
-    mget_recur(args, [])
-  end
-
-  def mget(_) do
-    {:error, :bad_syntax}
-  end
-
-  defp mget_recur([{:string, key_name} | next_args], key_names_acc) do
-    key_names_acc = [key_name | key_names_acc]
-    mget_recur(next_args, key_names_acc)
-  end
-
-  defp mget_recur([], key_names_acc) do
-    key_names = Enum.reverse(key_names_acc)
-    {:ok, key_names, &Exdis.Database.Value.String.mget(&1), [:varargs]}
-  end
-
-  defp mget_recur([_|_], _) do
-    {:error, :bad_syntax}
+  def mget(args) do
+    case Exdis.CommandParsers.Util.parse_string_list(args, [:non_empty]) do
+      {:ok, key_names} ->
+        {:ok, key_names, &Exdis.Database.Value.String.mget(&1), [:varargs]}
+      {:error, _} ->
+        {:error, :bad_syntax}
+    end
   end
 
   ## ------------------------------------------------------------------
   ## MSET Command
   ## ------------------------------------------------------------------
 
-  def mset([_|_] = args) do
-    mset_recur(args, [])
-  end
-
-  def mset(_) do
-    {:error, :bad_syntax}
-  end
-
-  defp mset_recur([{:string, key_name}, resp_value | next_args], pairs_acc) do
-    case Exdis.CommandParsers.Util.maybe_coerce_into_string(resp_value) do
-      {:ok, value} ->
-        pairs_acc = [{key_name, value} | pairs_acc]
-        mset_recur(next_args, pairs_acc)
+  def mset(args) do
+    case Exdis.CommandParsers.Util.parse_and_unzip_kvlist(args, [:non_empty, :unique]) do
+      {:ok, key_names, values} ->
+        {:ok, key_names, &Exdis.Database.Value.String.mset(&1, values), [:varargs]}
       {:error, _} ->
         {:error, :bad_syntax}
     end
-  end
-
-  defp mset_recur([], pairs_acc) do
-    {key_names, values} = Enum.unzip(pairs_acc)
-    {:ok, key_names, &Exdis.Database.Value.String.mset(&1, values), [:varargs]}
-  end
-
-  defp mset_recur([_|_], _) do
-    {:error, :bad_syntax}
   end
 
   ## ------------------------------------------------------------------

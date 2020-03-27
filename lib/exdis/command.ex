@@ -34,6 +34,7 @@ defmodule Exdis.Command do
     %{
       # Keys
       "DEL" => &Exdis.CommandParsers.Key.delete/1,
+      "EXISTS" => &Exdis.CommandParsers.Key.exist?/1,
       "KEYS" => &Exdis.CommandParsers.Key.keys/1,
 
       # Server

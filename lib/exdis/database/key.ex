@@ -26,4 +26,30 @@ defmodule Exdis.Database.Key do
       true  -> {:error, :key_not_set}
     end
   end
+
+  ## ------------------------------------------------------------------
+  ## EXIST Command
+  ## ------------------------------------------------------------------
+
+  def exist?(key_owners) do
+    exist_recur(key_owners, 0)
+  end
+
+  defp exist_recur([key_owner | next_key_owners], count_acc) do
+    case Exdis.Database.KeyOwner.read(key_owner, &handle_exists/1) do
+      {:ok, true} ->
+        exist_recur(next_key_owners, count_acc + 1)
+      {:ok, false} ->
+        exist_recur(next_key_owners, count_acc)
+    end
+  end
+
+  defp exist_recur([], count_acc) do
+    {:ok, {:integer, count_acc}}
+  end
+
+  defp handle_exists(state) do
+    exists = state !== nil
+    {:ok, exists}
+  end
 end
